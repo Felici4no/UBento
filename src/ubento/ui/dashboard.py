@@ -20,6 +20,7 @@ class Dashboard(QWidget):
     open_agent = Signal(str)
     expand_requested = Signal(str, object)  # (tipo do card, widget do card)
     configure_requested = Signal(str)  # id do agente
+    metas_requested = Signal(str)  # id do agente
 
     def __init__(self, store: Store, workspace: Workspace, agent: Agent | None = None, parent=None):
         """Sem `agent`, vira a aba Geral: o card Agentes ocupa o lugar do Swap."""
@@ -42,6 +43,7 @@ class Dashboard(QWidget):
         self.agents: AgentsCard | None = None
         self.bar: AgentBar | None = None
         self.decisions.resolve_requested.connect(self.resolve_decision)
+        self.decisions.registrar_requested.connect(self.solicitar_registro)
 
         if overview:
             self.agents = AgentsCard(workspace)
@@ -56,6 +58,7 @@ class Dashboard(QWidget):
             self.bar = AgentBar(workspace, agent.id)
             self.bar.run_requested.connect(self._run_agent)
             self.bar.configure_requested.connect(lambda: self.configure_requested.emit(agent.id))
+            self.bar.metas_requested.connect(lambda: self.metas_requested.emit(agent.id))
             self.exchange = ExchangeCard(store)
             self.exchange.notify.connect(self.notify)
             bottom_left = self.exchange
@@ -115,5 +118,22 @@ class Dashboard(QWidget):
         self.notify.emit(message, made > 0)
 
     def resolve_decision(self, uid: str, approve: bool) -> None:
+        """✓ aprova, ✕ recusa. Aprovar NÃO executa: a execução é registrada à parte."""
         error = self.workspace.resolve_decision(uid, approve)
-        self.notify.emit(error or ("Decisão aprovada e executada" if approve else "Proposta recusada"), error is None)
+        self.notify.emit(error or ("Aprovada. Falta registrar a execução depois que ela acontecer" if approve else "Proposta recusada"), error is None)
+
+    def solicitar_registro(self, uid: str) -> None:
+        """Pede confirmação explícita antes de registrar que a operação foi executada."""
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(QMessageBox.Icon.Question, "Registrar execução", "Confirma que esta operação foi executada?", parent=self)
+        box.setInformativeText("Só registre depois de a execução estar confirmada. Isto atualiza os saldos; aprovar sozinho não faz isso.")
+        sim = box.addButton("Registrar execução", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is sim:
+            self.registrar_execucao(uid)
+
+    def registrar_execucao(self, uid: str) -> None:
+        error = self.workspace.registrar_execucao(uid)
+        self.notify.emit(error or "Execução registrada", error is None)

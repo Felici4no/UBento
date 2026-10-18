@@ -83,7 +83,7 @@ class Decision:
     amount_text: str  # efeito, ex.: "+ 0,50000 ETH" (vazio se não houve movimento)
     moment: datetime
     agent: str | None = None  # id do agente; preenchido no agregado "Geral"
-    status: str = "executed"  # 'executed' | 'proposed' | 'rejected' | 'suggested'
+    status: str = "executed"  # 'executed' | 'proposed' | 'approved' | 'rejected' | 'suggested'
     trade: Trade | None = None
     uid: str = field(default_factory=lambda: uuid4().hex[:10])
 
@@ -253,18 +253,29 @@ class Store(QObject):
         self.changed.emit()
         return None
 
-    def resolve_decision(self, uid: str, approve: bool, now: datetime | None = None) -> str | None:
-        """Aprova ou recusa uma proposta. Devolve mensagem de erro, ou None."""
+    def resolve_decision(self, uid: str, approve: bool) -> str | None:
+        """Aprova ou recusa uma proposta. Devolve mensagem de erro, ou None.
+
+        **Aprovar não é executar.** A aprovação só autoriza: não mexe nos saldos nem no progresso de nenhuma meta.
+        A execução é um registro separado (`registrar_execucao`), feito quando a operação foi de fato confirmada.
+        """
         index = next((i for i, d in enumerate(self.decisions) if d.uid == uid and d.status == "proposed"), None)
         if index is None:
             return "Proposta não encontrada"
         d = self.decisions[index]
-        if approve:
-            if d.trade and not self.apply_trade(d.trade):
-                return "Saldo insuficiente para executar"
-            self.decisions[index] = replace(d, status="executed", moment=now or datetime.now())
-        else:
-            self.decisions[index] = replace(d, status="rejected")
+        self.decisions[index] = replace(d, status="approved" if approve else "rejected")
+        self.changed.emit()
+        return None
+
+    def registrar_execucao(self, uid: str, now: datetime | None = None) -> str | None:
+        """Registra que uma decisão APROVADA foi executada (confirmada). Só então os saldos mudam."""
+        index = next((i for i, d in enumerate(self.decisions) if d.uid == uid), None)
+        if index is None or self.decisions[index].status != "approved":
+            return "Só uma decisão aprovada pode ter a execução registrada"
+        d = self.decisions[index]
+        if d.trade and not self.apply_trade(d.trade):
+            return "Saldo insuficiente para registrar a execução"
+        self.decisions[index] = replace(d, status="executed", moment=now or datetime.now())
         self.changed.emit()
         return None
 

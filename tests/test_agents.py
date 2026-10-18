@@ -114,8 +114,9 @@ def test_proposal_does_not_move_money_until_approved(store):
     store.add_decision(d)
     assert store.holdings["USD"] == usd
     assert store.resolve_decision(d.uid, True) is None
-    assert store.holdings["USD"] < usd
-    assert store.decisions[0].status == "executed"
+    assert store.holdings["USD"] == usd and store.decisions[0].status == "approved"  # aprovar NÃO executa
+    assert store.registrar_execucao(d.uid) is None  # a execução é um registro separado
+    assert store.holdings["USD"] < usd and store.decisions[0].status == "executed"
 
 
 def test_rejected_proposal_changes_nothing(store):
@@ -167,6 +168,8 @@ def test_resolve_from_overview_reaches_owner_store():
     ws.run_agent(agent.id, NOW)
     uid = next(d.uid for d in ws.overview.decisions if d.status == "proposed")
     assert ws.resolve_decision(uid, True) is None
+    assert ws.pending_count() == 1  # aprovada, mas ainda falta registrar a execução
+    assert ws.registrar_execucao(uid) is None
     assert ws.pending_count() == 0
 
 

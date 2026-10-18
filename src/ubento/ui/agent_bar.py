@@ -36,6 +36,7 @@ class _Dot(QWidget):
 class AgentBar(QWidget):
     run_requested = Signal()
     configure_requested = Signal()
+    metas_requested = Signal()
 
     def __init__(self, workspace: Workspace, agent_id: str, parent=None):
         super().__init__(parent)
@@ -46,6 +47,8 @@ class AgentBar(QWidget):
         self.strategy, self.risk, self.mode, self.state, self.pending = Chip(), Chip(), Chip(), Chip(), Chip()
         self.run = ActionButton("Rodar agora", primary=True, height=38, pad=18)
         self.configure = ActionButton("Configurar", height=38, pad=18)
+        self.metas = ActionButton("Metas", height=38, pad=18)
+        self.metas.clicked.connect(self.metas_requested)
         self.run.clicked.connect(self.run_requested)
         self.configure.clicked.connect(self.configure_requested)
 
@@ -59,6 +62,7 @@ class AgentBar(QWidget):
             h.addWidget(chip)
         h.addStretch(1)
         h.addWidget(self.run)
+        h.addWidget(self.metas)
         h.addWidget(self.configure)
 
         workspace.agent_changed.connect(lambda i: self.refresh() if i == agent_id else None)
@@ -81,7 +85,7 @@ class AgentBar(QWidget):
         self.state.set_chip("Ativo" if cfg.active else "Pausado", theme.GREEN if cfg.active else theme.DIM)
         self.state.setVisible(not manual)
         count = self.ws.pending_count(self.agent_id)
-        self.pending.set_chip(f"{count} {'proposta' if count == 1 else 'propostas'}", theme.WARNING)
+        self.pending.set_chip(f"{count} {'pendente' if count == 1 else 'pendentes'}", theme.WARNING)
         self.pending.setVisible(count > 0)
         self.run.setEnabled(cfg.active and not manual)
         self.run.update()

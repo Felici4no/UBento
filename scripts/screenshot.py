@@ -2,7 +2,8 @@
 
     python scripts/screenshot.py saida.png [--tab N] [--hover] [--menu CHAVE|vazio]
 
---tab N      seleciona a aba N (0 = Geral), "settings" ou "cfg" (configuração do 1º agente)
+--tab N      seleciona a aba N (0 = Geral), "settings", "cfg" (configuração do 1º agente) ou "metas" (metas do 1º agente)
+--cenario X  com --tab metas: arquivo de exemplos/avaliacao a importar (padrão 04_*) e --momentos N a avançar (padrão todos)
 --run        roda os algoritmos dos agentes antes (gera propostas)
 --hide       liga o modo ocultar valores
 --expand K   salva <saida>-K.png com o card K expandido (crypto, total, summary, activity, decisions, agents, coin)
@@ -50,7 +51,16 @@ def main() -> None:
             ws.run_agent(agent.id)
     if which == "cfg":
         win.open_config(first)
-    tab = {"settings": len(keys) - 2, "cfg": len(keys) - 1}.get(which) or int(which)
+    if which == "metas":
+        raiz = Path(__file__).resolve().parents[1] / "exemplos" / "avaliacao"
+        cenario = arg("--cenario") or next(raiz.glob("04_*.yaml")).name
+        meta_id = win.metas.importar(raiz / cenario, first)
+        for _ in range(int(arg("--momentos") or 99)):
+            if win.metas.avancar(meta_id) is None:
+                break
+        win.open_metas(first)
+        keys.append("metas:" + first)
+    tab = {"settings": len(keys) - 2, "cfg": len(keys) - 1, "metas": len(keys) - 1}.get(which) or int(which)
     if "--hide" in sys.argv:
         ws.set_pref("hide_values", True)
     win.select(keys[tab])

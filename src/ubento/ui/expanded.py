@@ -269,6 +269,7 @@ def decisions_view(dash, ws):
     lst = DecisionList(store, lookup)
     lst.setMinimumHeight(360)
     lst.resolve_requested.connect(dash.resolve_decision)
+    lst.registrar_requested.connect(dash.solicitar_registro)
     kinds = ["all", *KIND_LABELS]
     labels = {"all": "Todas", **KIND_LABELS}
     box = QWidget()

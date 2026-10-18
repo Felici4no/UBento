@@ -21,13 +21,15 @@ W = theme.W
 ROW_H = 68
 ICONS = {"buy": "trending-up", "sell": "trending-down", "hold": "pause", "rebalance": "repeat", "swap": "swap"}
 KIND_LABELS = {"buy": "Compra", "sell": "Venda", "hold": "Manutenção", "rebalance": "Rebalanceamento", "swap": "Swap"}
-STATUS_TAGS = {"proposed": ("Proposta", theme.WARNING), "suggested": ("Sugestão", theme.BLUE_SOFT), "rejected": ("Recusada", theme.MUTED)}
+STATUS_TAGS = {"proposed": ("Proposta", theme.WARNING), "approved": ("Aprovada", theme.GREEN),
+               "suggested": ("Sugestão", theme.BLUE_SOFT), "rejected": ("Recusada", theme.MUTED)}
 
 AgentLookup = Callable[[str], "tuple[str, str] | None"]  # id -> (nome, cor)
 
 
 class DecisionList(QWidget):
     resolve_requested = Signal(str, bool)  # (uid da decisão, aprovada?)
+    registrar_requested = Signal(str)  # uid de uma decisão aprovada cuja execução será registrada
 
     def __init__(self, store: Store, lookup: AgentLookup | None = None, parent=None):
         super().__init__(parent)
@@ -58,12 +60,21 @@ class DecisionList(QWidget):
         w = self.width()
         return QRectF(w - 72, row_y + (ROW_H - 30) / 2, 30, 30), QRectF(w - 34, row_y + (ROW_H - 30) / 2, 30, 30)
 
-    def _hit_button(self, pos: QPointF) -> tuple[Decision, bool] | None:
+    def _registrar_rect(self, row_y: float) -> QRectF:
+        return QRectF(self.width() - 98, row_y + (ROW_H - 30) / 2, 96, 30)
+
+    def _hit_button(self, pos: QPointF) -> tuple[Decision, bool | None] | None:
+        """(decisão, True=aprovar / False=recusar / None=registrar execução) se o clique caiu num botão."""
         i = int((pos.y() + self._offset) // ROW_H)
         items = self.items()
-        if not 0 <= i < len(items) or items[i].status != "proposed":
+        if not 0 <= i < len(items):
             return None
-        ok, no = self._buttons(i * ROW_H - self._offset)
+        row_y = i * ROW_H - self._offset
+        if items[i].status == "approved":
+            return (items[i], None) if self._registrar_rect(row_y).contains(pos) else None
+        if items[i].status != "proposed":
+            return None
+        ok, no = self._buttons(row_y)
         if ok.contains(pos):
             return items[i], True
         if no.contains(pos):
@@ -82,7 +93,10 @@ class DecisionList(QWidget):
 
     def mousePressEvent(self, e) -> None:
         hit = self._hit_button(e.position()) if e.button() == Qt.MouseButton.LeftButton else None
-        if hit:
+        if hit and hit[1] is None:
+            self.registrar_requested.emit(hit[0].uid)
+            e.accept()
+        elif hit:
             self.resolve_requested.emit(hit[0].uid, hit[1])
             e.accept()
         else:
@@ -117,7 +131,8 @@ class DecisionList(QWidget):
     def _paint_row(self, p: QPainter, d: Decision, y: float, now: datetime, hovered: bool) -> None:
         w = self.width()
         proposed = d.status == "proposed"
-        edge = w - (84 if proposed else 0)  # as propostas reservam espaço para ✓ ✕
+        approved = d.status == "approved"
+        edge = w - (84 if proposed else 112 if approved else 0)  # reserva espaço para ✓ ✕ ou para "Registrar"
         p.setOpacity(0.5 if d.status == "rejected" else 1.0)
         if hovered or proposed:
             p.setBrush(QColor(255, 255, 255, 10 if hovered else 6))
@@ -190,6 +205,14 @@ class DecisionList(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(edge - gap - nw - 12, y + 45), 4, 4)
 
+        if approved:
+            caixa = self._registrar_rect(y)
+            p.setBrush(QColor(255, 255, 255, 8))
+            p.setPen(QPen(QColor(theme.BLUE_SOFT), 1.3))
+            p.drawRoundedRect(caixa.adjusted(0.6, 0.6, -0.6, -0.6), 15, 15)
+            p.setPen(QColor(theme.TEXT))
+            p.setFont(theme.font(13, W.Medium))
+            p.drawText(caixa, Qt.AlignmentFlag.AlignCenter, "Registrar")
         if proposed:
             ok, no = self._buttons(y)
             p.setBrush(QColor("#1F7A45"))
@@ -205,11 +228,13 @@ class DecisionList(QWidget):
 
 class DecisionsCard(Card):
     resolve_requested = Signal(str, bool)
+    registrar_requested = Signal(str)
 
     def __init__(self, store: Store, lookup: AgentLookup | None = None, parent=None):
         super().__init__(parent)
         self.list = DecisionList(store, lookup)
         self.list.resolve_requested.connect(self.resolve_requested)
+        self.list.registrar_requested.connect(self.registrar_requested)
         v = QVBoxLayout(self)
         v.setContentsMargins(22, 20, 22, 0)
         v.setSpacing(0)

@@ -152,9 +152,19 @@ class Workspace(QObject):
                 return error
         return "Proposta não encontrada"
 
+    def registrar_execucao(self, uid: str) -> str | None:
+        """Registra a execução de uma decisão aprovada (passo SEPARADO da aprovação)."""
+        for agent in self.agents:
+            if any(d.uid == uid for d in agent.store.decisions):
+                error = agent.store.registrar_execucao(uid)
+                self.agent_changed.emit(agent.id)
+                return error
+        return "Decisão não encontrada"
+
     def pending_count(self, agent_id: str | None = None) -> int:
+        """Decisões que esperam uma ação sua: aprovar/recusar (propostas) ou registrar a execução (aprovadas)."""
         agents = [a for a in self.agents if agent_id in (None, a.id)]
-        return sum(1 for a in agents for d in a.store.decisions if d.status == "proposed")
+        return sum(1 for a in agents for d in a.store.decisions if d.status in ("proposed", "approved"))
 
     # -- consulta ----------------------------------------------------------
 

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from ..metas import ServicoMetas
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
 from . import theme
@@ -17,11 +18,13 @@ from .components import Toast
 from .dashboard import Dashboard
 from .expanded import build as build_expanded
 from .header import Tab, TabHeader
+from .metas_page import MetasPage
 from .overlay import ExpandOverlay
 from .settings import SettingsPage
 
 SETTINGS = "settings"
 CFG = "cfg:"  # prefixo da página de configuração de um agente
+METAS = "metas:"  # prefixo da página de metas de um agente
 
 
 class _Canvas(QWidget):
@@ -52,7 +55,7 @@ def _swatch(color: str) -> QIcon:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, workspace: Workspace, animations: bool = True):
+    def __init__(self, workspace: Workspace, animations: bool = True, metas: ServicoMetas | None = None):
         super().__init__()
         self.setWindowTitle("UBento")
         self.setMinimumSize(760, 520)
@@ -60,6 +63,7 @@ class MainWindow(QMainWindow):
         self.resize(980, min(1100, (available.height() - 40) if available else 1100))
 
         self.workspace = workspace
+        self.metas = metas or ServicoMetas()  # sem banco informado: em memória (testes, capturas)
         self.animations = animations
         self.pages: dict[str, QScrollArea] = {}
         self.current = OVERVIEW
@@ -108,6 +112,7 @@ class MainWindow(QMainWindow):
     def _page(self, key: str, store: Store) -> QScrollArea:
         dash = Dashboard(store, self.workspace, self.workspace.agent(key) if key != OVERVIEW else None)
         dash.configure_requested.connect(self.open_config)
+        dash.metas_requested.connect(self.open_metas)
         dash.notify.connect(self.toast.show_message)
         dash.open_agent.connect(self.select)
         dash.expand_requested.connect(lambda kind, card, d=dash: self.expand(d, kind, card))
@@ -125,7 +130,7 @@ class MainWindow(QMainWindow):
         self.header.set_greeting(ws.pref("user_name"))
         self.header.set_hidden(ws.pref("hide_values"))
         for key in self.pages:
-            if key != SETTINGS and not key.startswith(CFG) and ws.pref("default_range") != self.dashboard(key).total.range_key:
+            if key != SETTINGS and not key.startswith((CFG, METAS)) and ws.pref("default_range") != self.dashboard(key).total.range_key:
                 self.dashboard(key).total.set_range(ws.pref("default_range"))
 
     def dashboard(self, key: str) -> Dashboard:
@@ -133,7 +138,7 @@ class MainWindow(QMainWindow):
 
     def sync(self) -> None:
         ws = self.workspace
-        wanted = {OVERVIEW, SETTINGS} | {a.id for a in ws.agents} | {CFG + a.id for a in ws.agents}
+        wanted = {OVERVIEW, SETTINGS} | {a.id for a in ws.agents} | {CFG + a.id for a in ws.agents} | {METAS + a.id for a in ws.agents}
         for key in list(self.pages):
             if key not in wanted:
                 page = self.pages.pop(key)
@@ -157,8 +162,11 @@ class MainWindow(QMainWindow):
         self.header.set_tabs(tabs, self._tab_key())
 
     def _tab_key(self) -> str:
-        """A página de configuração mantém a aba do agente destacada."""
-        return self.current[len(CFG):] if self.current.startswith(CFG) else self.current
+        """As páginas de configuração e de metas mantêm a aba do agente destacada."""
+        for prefixo in (CFG, METAS):
+            if self.current.startswith(prefixo):
+                return self.current[len(prefixo):]
+        return self.current
 
     def select(self, key: str) -> None:
         if key not in self.pages:
@@ -187,6 +195,15 @@ class MainWindow(QMainWindow):
         key = CFG + agent_id
         if key not in self.pages and self.workspace.agent(agent_id):
             page = AgentConfigPage(self.workspace, agent_id)
+            page.notify.connect(self.toast.show_message)
+            page.back_requested.connect(lambda: self.select(agent_id))
+            self.pages[key] = self._scroll(page)
+        self.select(key)
+
+    def open_metas(self, agent_id: str) -> None:
+        key = METAS + agent_id
+        if key not in self.pages and self.workspace.agent(agent_id):
+            page = MetasPage(self.workspace, self.metas, agent_id)
             page.notify.connect(self.toast.show_message)
             page.back_requested.connect(lambda: self.select(agent_id))
             self.pages[key] = self._scroll(page)
@@ -245,6 +262,7 @@ class MainWindow(QMainWindow):
         agent = ws.agent(key)
         if agent is not None:
             menu.addAction("Configurar agente…", lambda: self.open_config(key))
+            menu.addAction("Metas…", lambda: self.open_metas(key))
         menu.addAction("Renomear…", lambda: self.rename(key))
         if agent is None:  # aba "Geral": só renomeia
             return menu

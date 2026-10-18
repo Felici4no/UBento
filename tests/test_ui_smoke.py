@@ -106,7 +106,7 @@ def test_context_menu_contents(window):
     assert labels(window.build_menu(None)) == ["Novo agente"]
     assert labels(window.build_menu("overview")) == ["Renomear…"]
     agent_menu = labels(window.build_menu(window.workspace.agents[0].id))
-    assert agent_menu == ["Configurar agente…", "Renomear…", "Cor", "Duplicar", "Mover para a esquerda", "Mover para a direita", "Remover"]
+    assert agent_menu == ["Configurar agente…", "Metas…", "Renomear…", "Cor", "Duplicar", "Mover para a esquerda", "Mover para a direita", "Remover"]
 
 
 def test_overview_swaps_agents_card_for_exchange(window):
@@ -277,9 +277,13 @@ def test_agent_bar_runs_and_proposals_can_be_approved(window):
     assert window.workspace.pending_count(agent.id) == 1
     assert window.header._tabs[1].pending == 1
     uid = next(d.uid for d in agent.store.decisions if d.status == "proposed")
+    usd = agent.store.holdings["USD"]
     dash.decisions.resolve_requested.emit(uid, True)
-    assert window.workspace.pending_count(agent.id) == 0
-    assert window.header._tabs[1].pending == 0
+    assert agent.store.holdings["USD"] == usd  # ✓ aprova, mas NÃO executa
+    assert window.workspace.pending_count(agent.id) == 1 and window.header._tabs[1].pending == 1
+    dash.registrar_execucao(uid)  # passo separado: a execução foi confirmada
+    assert agent.store.holdings["USD"] < usd
+    assert window.workspace.pending_count(agent.id) == 0 and window.header._tabs[1].pending == 0
 
 
 def test_decision_list_buttons_hit_testing(window):
@@ -305,3 +309,48 @@ def test_removing_an_agent_drops_its_config_page(window):
     assert f"cfg:{extra.id}" in window.pages
     ws.remove(extra.id)
     assert f"cfg:{extra.id}" not in window.pages and window.current == "overview"
+
+
+def test_approved_decision_shows_a_register_button_that_asks_for_execution(window):
+    from PySide6.QtCore import QPointF
+
+    from ubento.ui.cards.decisions import ROW_H
+
+    agent = window.workspace.agents[0]
+    window.workspace.set_config(agent.id, strategy="dca", mode="approve")
+    window.workspace.run_agent(agent.id)
+    uid = next(d.uid for d in agent.store.decisions if d.status == "proposed")
+    window.workspace.resolve_decision(uid, True)
+    lst = window.dashboard(agent.id).decisions.list
+    lst.resize(480, 300)
+    linha = next(i for i, d in enumerate(lst.items()) if d.uid == uid)
+    caixa = lst._registrar_rect(linha * ROW_H - lst._offset)
+    decisao, acao = lst._hit_button(caixa.center())
+    assert decisao.uid == uid and acao is None  # None = "registrar execução" (nem aprovar, nem recusar)
+    assert lst._hit_button(QPointF(10, caixa.center().y())) is None
+
+
+def test_metas_page_imports_and_steps_and_decisions_do_not_touch_progress(window):
+    from pathlib import Path
+
+    agent = window.workspace.agents[0]
+    cenario = Path(__file__).resolve().parent.parent / "exemplos" / "avaliacao" / "01_parcial_ate_atingir.yaml"
+    window.open_metas(agent.id)
+    page = window.pages["metas:" + agent.id].widget()
+    assert window.current == "metas:" + agent.id and window.header._current == agent.id  # a aba do agente segue destacada
+    assert not page.avancar.isEnabled()  # sem meta ainda
+    page.importar_arquivo(str(cenario))
+    assert page.avancar.isEnabled() and page.meta_id
+    antes = window.metas.painel(page.meta_id)
+    assert antes.estado is None
+    page.avancar.clicked.emit()
+    depois = window.metas.painel(page.meta_id)
+    assert depois.estado is not None and depois.progresso.quantidade_comprovada >= 0
+    # aprovar/recusar/registrar decisões do agente NÃO mexe no progresso das metas
+    window.workspace.set_config(agent.id, strategy="dca", mode="approve")
+    window.workspace.run_agent(agent.id)
+    uid = next(d.uid for d in agent.store.decisions if d.status == "proposed")
+    window.workspace.resolve_decision(uid, True)
+    window.workspace.registrar_execucao(uid)
+    assert window.metas.painel(page.meta_id).progresso == depois.progresso
+    assert window.metas.repo.eventos(page.meta_id) == list(depois.eventos)
