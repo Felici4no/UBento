@@ -1,0 +1,48 @@
+# Uma única execução interna que agrega dois preenchimentos: o preço é a média ponderada por quantidade.
+schema_versao: 1
+origem: simulado
+descricao: "Agregação de 4 @ 10 e 6 @ 9,5: preço médio ponderado 9,7; taxa total 0,05. Em ex-2 o preço informado (9,75) não é a média."
+politica: {janela_atraso_segundos: 3600, tolerancia_horario_segundos: 60}
+execucoes:
+  - id: ex-1
+    meta_id: meta-tokx-001
+    ativo_id: tokx
+    lado: compra
+    quantidade_bruta: "10"
+    taxa_no_ativo: "0.05"
+    quantidade_liquida: "9.95"
+    preco_executado: "9.7"
+    executada_em: "2026-10-20T10:00:00Z"
+    confirmada_em: "2026-10-20T10:05:00Z"
+    fonte_id: registro-manual
+    origem: simulado
+    referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-a}, {fonte_id: corretora-sim, id_externo: fill-b}]
+  - id: ex-2
+    meta_id: meta-tokx-002
+    ativo_id: tokx
+    lado: compra
+    quantidade_bruta: "10"
+    taxa_no_ativo: "0.05"
+    quantidade_liquida: "9.95"
+    preco_executado: "9.75"
+    executada_em: "2026-10-20T10:00:00Z"
+    confirmada_em: "2026-10-20T10:05:00Z"
+    fonte_id: registro-manual
+    origem: simulado
+    referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-c}, {fonte_id: corretora-sim, id_externo: fill-d}]
+registros_externos:
+  - {fonte_id: corretora-sim, id_externo: fill-a, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "4", preco: "10",
+     taxas: [{ativo_id: tokx, valor: "0.02"}], status: confirmado, executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:10Z", origem: simulado}
+  - {fonte_id: corretora-sim, id_externo: fill-b, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "6", preco: "9.5",
+     taxas: [{ativo_id: tokx, valor: "0.03"}], status: confirmado, executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:10Z", origem: simulado}
+  - {fonte_id: corretora-sim, id_externo: fill-c, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "4", preco: "10",
+     taxas: [{ativo_id: tokx, valor: "0.02"}], status: confirmado, executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:10Z", origem: simulado}
+  - {fonte_id: corretora-sim, id_externo: fill-d, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "6", preco: "9.5",
+     taxas: [{ativo_id: tokx, valor: "0.03"}], status: confirmado, executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:10Z", origem: simulado}
+momentos:
+  - agora: "2026-10-20T12:00:00Z"
+    esperado:
+      execucoes: {ex-1: conciliada, ex-2: divergente}
+      motivos: {ex-2: [preco_diferente]}
+      comprovado: {meta-tokx-001: "9.95", meta-tokx-002: "0"}
+      confirmacao: incompleta

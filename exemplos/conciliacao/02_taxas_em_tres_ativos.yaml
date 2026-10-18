@@ -1,0 +1,33 @@
+# Taxa no ativo recebido REDUZ a quantidade; taxa na moeda de cotação e em outro ativo (BNB) viram CUSTOS.
+schema_versao: 1
+origem: simulado
+descricao: "Três taxas diferentes na mesma compra. Só a cobrada em TOKX reduz as unidades acumuladas."
+politica: {janela_atraso_segundos: 3600, tolerancia_horario_segundos: 60}
+execucoes:
+  - id: ex-1
+    meta_id: meta-tokx-001
+    ativo_id: tokx
+    lado: compra
+    quantidade_bruta: "100"
+    taxa_no_ativo: "0.1"
+    quantidade_liquida: "99.9"
+    preco_executado: "10"
+    taxa_na_cotacao: "5"
+    moeda_cotacao_id: usd
+    taxas_outros_ativos: [{ativo_id: bnb, valor: "0.002"}]
+    executada_em: "2026-10-20T10:00:00Z"
+    confirmada_em: "2026-10-20T10:01:00Z"
+    fonte_id: registro-manual
+    origem: simulado
+    referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-010}]
+registros_externos:
+  - {fonte_id: corretora-sim, id_externo: fill-010, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra,
+     quantidade: "100", preco: "10",
+     taxas: [{ativo_id: tokx, valor: "0.1"}, {ativo_id: usd, valor: "5"}, {ativo_id: bnb, valor: "0.002"}],
+     status: confirmado, executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:30Z", origem: simulado}
+momentos:
+  - agora: "2026-10-20T12:00:00Z"
+    esperado:
+      execucoes: {ex-1: conciliada}
+      comprovado: {meta-tokx-001: "99.9"}
+      confirmacao: confirmada

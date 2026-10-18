@@ -526,8 +526,28 @@ class Ativacao(Modelo):
 # -- eventos, execuções e avaliações (formato dos registros) ----------------------------------------------------------
 
 
+class ReferenciaExterna(Modelo):
+    """Aponta, por identificador estável, para o registro de uma fonte externa que comprova a execução."""
+
+    fonte_id: Identificador
+    id_externo: Identificador
+    # None = a execução usa o registro externo INTEIRO. Um valor permite dividir um registro entre execuções
+    # (ex.: duas metas), desde que a soma das alocações não ultrapasse a quantidade do registro.
+    quantidade_bruta_alocada: Positivo | None = None
+
+
+class TaxaOutroAtivo(Modelo):
+    """Taxa cobrada em um ativo que não é o recebido nem a moeda de cotação. Entra nos custos; nunca reduz unidades."""
+
+    ativo_id: Identificador
+    valor: Positivo
+
+
 class Execucao(Modelo):
-    """Operação CONFIRMADA. Aprovar uma proposta não cria execução (ver docs/ESPECIFICACAO_NUCLEO.md §2)."""
+    """Operação CONFIRMADA. Aprovar uma proposta não cria execução (ver docs/ESPECIFICACAO_NUCLEO.md §2).
+
+    É o registro INTERNO. A prova vem da conciliação com registros externos (docs/CONCILIACAO.md).
+    """
 
     id: Identificador
     meta_id: Identificador
@@ -544,9 +564,22 @@ class Execucao(Modelo):
     fonte_id: Identificador
     origem: OrigemDado
     estorna_execucao_id: Identificador | None = None
+    moeda_cotacao_id: Identificador | None = None  # em que ativo estão taxa_na_cotacao e custo_fixo_real
+    taxas_outros_ativos: tuple[TaxaOutroAtivo, ...] = ()
+    referencias_externas: tuple[ReferenciaExterna, ...] = ()
 
     @model_validator(mode="after")
     def _coerencia(self) -> Execucao:
+        if (self.taxa_na_cotacao > 0 or self.custo_fixo_real > 0) and self.moeda_cotacao_id is None:
+            raise ValueError("taxa_na_cotacao/custo_fixo_real exigem moeda_cotacao_id")
+        chaves = [(r.fonte_id, r.id_externo) for r in self.referencias_externas]
+        if len(chaves) != len(set(chaves)):
+            raise ValueError("referencias_externas repetidas")
+        ativos_taxa = [t.ativo_id for t in self.taxas_outros_ativos]
+        if len(ativos_taxa) != len(set(ativos_taxa)):
+            raise ValueError("taxas_outros_ativos repetidas para o mesmo ativo")
+        if {self.ativo_id, self.moeda_cotacao_id} & set(ativos_taxa):
+            raise ValueError("taxas_outros_ativos não pode repetir o ativo recebido nem a moeda de cotação")
         if self.quantidade_liquida != self.quantidade_bruta - self.taxa_no_ativo:
             raise ValueError("quantidade_liquida deve ser quantidade_bruta - taxa_no_ativo")
         if self.confirmada_em < self.executada_em:

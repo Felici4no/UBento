@@ -1,0 +1,96 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+coberturas:
+- ativo_id: tokx
+  fim: '2026-10-20T12:00:00Z'
+  fonte_id: corretora-sim
+  inicio: '2026-10-20T08:00:00Z'
+descricao: 'O saldo subiu 59,95: 50 de um DEPÓSITO externo + 9,95 da compra. O depósito explica o saldo, mas NUNCA conta como progresso.'
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-1
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '9.95'
+    confirmacao: confirmada
+    execucoes:
+      ex-1: conciliada
+    saldos:
+      tokx: explicada
+movimentacoes:
+- ativo_id: tokx
+  em: '2026-10-20T09:30:00Z'
+  fonte_id: corretora-sim
+  id_externo: mov-1
+  origem: simulado
+  quantidade: '50'
+  recebido_em: '2026-10-20T09:30:00Z'
+  tipo: deposito
+- ativo_id: tokx
+  em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: mov-2
+  origem: simulado
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:00Z'
+  referencia_execucao_externa: fill-001
+  tipo: execucao
+- ativo_id: tokx
+  em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: mov-3
+  origem: simulado
+  quantidade: '-0.05'
+  recebido_em: '2026-10-20T10:00:00Z'
+  referencia_execucao_externa: fill-001
+  tipo: taxa
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+saldos:
+- ativo_id: tokx
+  fonte_id: corretora-sim
+  observado_em: '2026-10-20T09:00:00Z'
+  origem: simulado
+  quantidade: '100'
+  recebido_em: '2026-10-20T09:00:00Z'
+- ativo_id: tokx
+  fonte_id: corretora-sim
+  observado_em: '2026-10-20T11:00:00Z'
+  origem: simulado
+  quantidade: '159.95'
+  recebido_em: '2026-10-20T11:00:00Z'
+schema_versao: 1

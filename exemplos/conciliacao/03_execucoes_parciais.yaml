@@ -1,0 +1,29 @@
+# Uma ordem preenchida em três partes; cada preenchimento tem a sua execução interna e o seu identificador.
+schema_versao: 1
+origem: simulado
+descricao: "Ordem ord-1 em 3 preenchimentos (4, 3 e 3). Cada um é conciliado por identificador; o total é a soma."
+politica: {janela_atraso_segundos: 3600, tolerancia_horario_segundos: 60}
+execucoes:
+  - {id: ex-1, meta_id: meta-tokx-001, ativo_id: tokx, lado: compra, quantidade_bruta: "4", taxa_no_ativo: "0.02", quantidade_liquida: "3.98",
+     preco_executado: "10", executada_em: "2026-10-20T10:00:00Z", confirmada_em: "2026-10-20T10:05:00Z", fonte_id: registro-manual, origem: simulado,
+     referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-p1}]}
+  - {id: ex-2, meta_id: meta-tokx-001, ativo_id: tokx, lado: compra, quantidade_bruta: "3", taxa_no_ativo: "0.015", quantidade_liquida: "2.985",
+     preco_executado: "9.9", executada_em: "2026-10-20T10:01:00Z", confirmada_em: "2026-10-20T10:05:00Z", fonte_id: registro-manual, origem: simulado,
+     referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-p2}]}
+  - {id: ex-3, meta_id: meta-tokx-001, ativo_id: tokx, lado: compra, quantidade_bruta: "3", taxa_no_ativo: "0.015", quantidade_liquida: "2.985",
+     preco_executado: "9.8", executada_em: "2026-10-20T10:02:00Z", confirmada_em: "2026-10-20T10:05:00Z", fonte_id: registro-manual, origem: simulado,
+     referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-p3}]}
+registros_externos:
+  - {fonte_id: corretora-sim, id_externo: fill-p1, id_ordem: ord-1, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "4", preco: "10",
+     taxas: [{ativo_id: tokx, valor: "0.02"}], status: confirmado, executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:10Z", origem: simulado}
+  - {fonte_id: corretora-sim, id_externo: fill-p2, id_ordem: ord-1, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "3", preco: "9.9",
+     taxas: [{ativo_id: tokx, valor: "0.015"}], status: confirmado, executado_em: "2026-10-20T10:01:00Z", recebido_em: "2026-10-20T10:01:10Z", origem: simulado}
+  - {fonte_id: corretora-sim, id_externo: fill-p3, id_ordem: ord-1, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra, quantidade: "3", preco: "9.8",
+     taxas: [{ativo_id: tokx, valor: "0.015"}], status: confirmado, executado_em: "2026-10-20T10:02:00Z", recebido_em: "2026-10-20T10:02:10Z", origem: simulado}
+momentos:
+  - agora: "2026-10-20T12:00:00Z"
+    esperado:
+      execucoes: {ex-1: conciliada, ex-2: conciliada, ex-3: conciliada}
+      comprovado: {meta-tokx-001: "9.95"}
+      confirmacao: confirmada
+      orfaos: []

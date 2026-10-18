@@ -1,0 +1,70 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: 'Duas metas reivindicam o registro externo INTEIRO. Nenhuma recebe o crédito: revisão em ambas.'
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-a
+  lado: compra
+  meta_id: meta-a
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+  taxa_no_ativo: '0.05'
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-b
+  lado: compra
+  meta_id: meta-b
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-a: '0'
+      meta-b: '0'
+    confirmacao: incompleta
+    execucoes:
+      ex-a: revisao
+      ex-b: revisao
+    motivos:
+      ex-a:
+      - registro_externo_em_metas_diferentes
+    orfaos: []
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+schema_versao: 1

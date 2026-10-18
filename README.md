@@ -34,6 +34,10 @@ do sistema. Contrato e decisões em [`docs/ESPECIFICACAO_NUCLEO.md`](docs/ESPECI
 roadmap em [`docs/ANALISE_META_MOTOR.md`](docs/ANALISE_META_MOTOR.md); documentos de exemplo (dados simulados) em
 `exemplos/nucleo/`.
 
+A **conciliação** (`ubento.nucleo.conciliacao`) compara execuções internas com registros externos (taxas, quantidades
+recebidas, parciais, duplicidades, correções) e, separadamente, explica variações de saldo. Contrato em
+[`docs/CONCILIACAO.md`](docs/CONCILIACAO.md); cenários fictícios de reprodução em `exemplos/conciliacao/`.
+
 ```bash
 pytest tests/nucleo          # inclui testes de propriedade (Hypothesis)
 ```

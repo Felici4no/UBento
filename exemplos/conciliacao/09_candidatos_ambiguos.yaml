@@ -1,0 +1,68 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: 'Dois registros externos servem como candidatos igualmente bons. Nenhum é escolhido sozinho: revisão e dois órfãos.'
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-1
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    confirmacao: incompleta
+    execucoes:
+      ex-1: revisao
+    motivos:
+      ex-1:
+      - sem_identificador_externo
+    orfaos:
+    - fill-81
+    - fill-82
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:10Z'
+  fonte_id: corretora-sim
+  id_externo: fill-81
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:15Z'
+  fonte_id: corretora-sim
+  id_externo: fill-82
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+schema_versao: 1

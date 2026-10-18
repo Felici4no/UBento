@@ -1,0 +1,70 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: 'As alocações (7 + 4) ultrapassam os 10 do registro externo: revisão nas duas execuções.'
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-a
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '7'
+  quantidade_liquida: '6.93'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+    quantidade_bruta_alocada: '7'
+  taxa_no_ativo: '0.07'
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-b
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '4'
+  quantidade_liquida: '3.96'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+    quantidade_bruta_alocada: '4'
+  taxa_no_ativo: '0.04'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    confirmacao: incompleta
+    execucoes:
+      ex-a: revisao
+      ex-b: revisao
+    motivos:
+      ex-a:
+      - alocacao_excede_registro_externo
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.1'
+  versao: 1
+schema_versao: 1

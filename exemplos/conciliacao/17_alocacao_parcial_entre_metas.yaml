@@ -1,0 +1,70 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: 'Um registro de 10 TOKX dividido explicitamente: 6 para meta-a e 4 para meta-b, com a taxa rateada proporcionalmente. Ninguém é contado
+  duas vezes.'
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-a
+  lado: compra
+  meta_id: meta-a
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '6'
+  quantidade_liquida: '5.94'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+    quantidade_bruta_alocada: '6'
+  taxa_no_ativo: '0.06'
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-b
+  lado: compra
+  meta_id: meta-b
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '4'
+  quantidade_liquida: '3.96'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+    quantidade_bruta_alocada: '4'
+  taxa_no_ativo: '0.04'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-a: '5.94'
+      meta-b: '3.96'
+    confirmacao: confirmada
+    execucoes:
+      ex-a: conciliada
+      ex-b: conciliada
+    orfaos: []
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.1'
+  versao: 1
+schema_versao: 1

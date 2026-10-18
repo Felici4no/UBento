@@ -1,0 +1,154 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: 'Uma divergência por execução: quantidade, taxa no ativo, preço e horário. Todas ficam fora do progresso, com o motivo certo.'
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-q
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '9'
+  quantidade_liquida: '8.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-q
+  taxa_no_ativo: '0.05'
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-t
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.94'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-t
+  taxa_no_ativo: '0.06'
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-p
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.6'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-p
+  taxa_no_ativo: '0.05'
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:11:00Z'
+  executada_em: '2026-10-20T10:10:00Z'
+  fonte_id: registro-manual
+  id: ex-h
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-h
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    confirmacao: incompleta
+    execucoes:
+      ex-h: divergente
+      ex-p: divergente
+      ex-q: divergente
+      ex-t: divergente
+    motivos:
+      ex-h:
+      - horario_fora_da_tolerancia
+      ex-p:
+      - preco_diferente
+      ex-q:
+      - quantidade_bruta_diferente
+      ex-t:
+      - taxa_no_ativo_diferente
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-q
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-t
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-p
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-h
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+schema_versao: 1

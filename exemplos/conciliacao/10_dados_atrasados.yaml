@@ -1,0 +1,74 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: O registro externo só chega às 13:00. Antes disso a execução fica pendente e, passada a janela de atraso, sem registro externo.
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-1
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T10:10:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    confirmacao: incompleta
+    declarado:
+      meta-tokx-001: '9.95'
+    eventos: []
+    execucoes:
+      ex-1: pendente
+    motivos:
+      ex-1:
+      - aguardando_registro_externo
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    eventos: []
+    execucoes:
+      ex-1: sem_registro_externo
+    motivos:
+      ex-1:
+      - registro_externo_nao_encontrado
+- agora: '2026-10-20T14:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '9.95'
+    confirmacao: confirmada
+    eventos:
+    - execucao_conciliada
+    execucoes:
+      ex-1: conciliada
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T13:00:00Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+schema_versao: 1

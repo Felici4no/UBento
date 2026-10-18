@@ -1,0 +1,32 @@
+# Cenário FICTÍCIO. Uma compra, um registro externo que coincide em tudo.
+schema_versao: 1
+origem: simulado
+descricao: "Compra de 10 TOKX com taxa de 0,05 TOKX cobrada no ativo recebido: líquida 9,95."
+politica: {janela_atraso_segundos: 3600, tolerancia_horario_segundos: 60}
+execucoes:
+  - id: ex-1
+    meta_id: meta-tokx-001
+    ativo_id: tokx
+    lado: compra
+    quantidade_bruta: "10"
+    taxa_no_ativo: "0.05"
+    quantidade_liquida: "9.95"
+    preco_executado: "9.5"
+    executada_em: "2026-10-20T10:00:00Z"
+    confirmada_em: "2026-10-20T10:01:00Z"
+    fonte_id: registro-manual
+    origem: simulado
+    referencias_externas: [{fonte_id: corretora-sim, id_externo: fill-001}]
+registros_externos:
+  - {fonte_id: corretora-sim, id_externo: fill-001, mercado_id: bolsa-a, ativo_id: tokx, moeda_cotacao_id: usd, lado: compra,
+     quantidade: "10", preco: "9.5", taxas: [{ativo_id: tokx, valor: "0.05"}], status: confirmado,
+     executado_em: "2026-10-20T10:00:00Z", recebido_em: "2026-10-20T10:00:30Z", origem: simulado}
+momentos:
+  - agora: "2026-10-20T12:00:00Z"
+    esperado:
+      execucoes: {ex-1: conciliada}
+      comprovado: {meta-tokx-001: "9.95"}
+      declarado: {meta-tokx-001: "9.95"}
+      confirmacao: confirmada
+      orfaos: []
+      eventos: [execucao_conciliada]

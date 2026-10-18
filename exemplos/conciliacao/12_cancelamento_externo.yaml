@@ -1,0 +1,80 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: A fonte cancela a execução depois de confirmá-la. Ela deixa de contar e o evento compensatório devolve o que havia sido somado.
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-1
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T10:30:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '9.95'
+    eventos:
+    - execucao_conciliada
+    execucoes:
+      ex-1: conciliada
+- agora: '2026-10-20T11:30:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    confirmacao: incompleta
+    eventos:
+    - conciliacao_revertida
+    - divergencia_aberta
+    execucoes:
+      ex-1: divergente
+    motivos:
+      ex-1:
+      - cancelado_externamente
+    orfaos: []
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos:
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T10:00:30Z'
+  status: confirmado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 1
+- ativo_id: tokx
+  executado_em: '2026-10-20T10:00:00Z'
+  fonte_id: corretora-sim
+  id_externo: fill-001
+  lado: compra
+  mercado_id: bolsa-a
+  moeda_cotacao_id: usd
+  origem: simulado
+  preco: '9.5'
+  quantidade: '10'
+  recebido_em: '2026-10-20T11:00:00Z'
+  status: cancelado
+  taxas:
+  - ativo_id: tokx
+    valor: '0.05'
+  versao: 2
+schema_versao: 1
