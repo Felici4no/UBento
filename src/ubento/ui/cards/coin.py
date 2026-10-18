@@ -141,6 +141,7 @@ class CoinCard(Card):
         head.addStretch()
         head.addWidget(receive)
         head.addWidget(buy)
+        head.addSpacing(40)  # espaço da seta de expandir
 
         foot = QHBoxLayout()
         foot.setSpacing(10)

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup, QHBoxLayout, QLineEdit, QMessageBox, QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -12,10 +12,11 @@ from .. import __version__
 from ..store import RANGES
 from ..workspace import Workspace
 from . import theme
-from .components import ActionButton, Card, Label, PillButton, Switch
+from .components import ActionButton, Card, Label, LinkButton, PillButton, Switch
 
 W = theme.W
-REPO_URL = "github.com/Felici4no/UBento"
+REPO = "github.com/Felici4no/UBento"
+REPO_URL = f"https://{REPO}"
 
 
 class _Row(QWidget):
@@ -105,6 +106,10 @@ class SettingsPage(QWidget):
         reset_tabs = ActionButton("Restaurar", danger=True)
         reset_tabs.clicked.connect(self._reset_agents)
 
+        github = LinkButton("GitHub")
+        github.setToolTip(REPO_URL)
+        github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
+
         sections = [
             _Section("PERFIL", [_Row("Nome", "Como o UBento chama você no topo da tela.", self.name)]),
             _Section("EXIBIÇÃO", [
@@ -119,7 +124,7 @@ class SettingsPage(QWidget):
                 _Row("Dados de demonstração", "Volta saldos, swaps e decisões ao estado inicial. Nomes e cores dos agentes são mantidos.", reset_data),
                 _Row("Abas padrão", "Descarta os agentes atuais e recria Pessoal e Empresa.", reset_tabs),
             ]),
-            _Section("SOBRE", [_Row(f"UBento {__version__}", f"Código aberto, licença MIT · {REPO_URL}", None)]),
+            _Section("SOBRE", [_Row(f"UBento {__version__}", f"Código aberto, licença MIT · {REPO}", github)]),
         ]
 
         column = QVBoxLayout()

@@ -4,6 +4,7 @@
 
 --tab N      seleciona a aba N (0 = Geral) ou "settings"
 --hide       liga o modo ocultar valores
+--expand K   salva <saida>-K.png com o card K expandido (crypto, total, summary, activity, decisions, agents, coin)
 --hover      simula o mouse sobre o gráfico de barras
 --menu K     salva também <saida>-menu.png com o menu de botão direito
              (K = índice da aba, ou "vazio" para o menu do espaço vazio do header)
@@ -35,7 +36,7 @@ def main() -> None:
     app.setFont(theme.font(13))
     app.setStyleSheet(theme.APP_QSS)
     ws = Workspace()
-    win = MainWindow(ws)
+    win = MainWindow(ws, animations=False)
     win.show()
     app.processEvents()
 
@@ -70,6 +71,14 @@ def main() -> None:
     p.end()
     img.save(out)
     print(f"salvo em {out} ({img.width()}x{img.height()})")
+
+    kind = arg("--expand")
+    if kind:
+        dash = win.dashboard(keys[tab])
+        win.expand(dash, kind, getattr(dash, kind))
+        app.processEvents()
+        win.grab().save(out.replace(".png", f"-{kind}.png"))
+        print(f"expandido: {kind}")
 
     menu_arg = arg("--menu")
     if menu_arg:

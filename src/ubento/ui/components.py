@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QFrame, QGraphicsOpacityEffect, QLabel, QSizePolicy, QWidget,
@@ -39,13 +39,72 @@ class Label(QLabel):
         self.setPalette(pal)
 
 
+class CornerButton(QAbstractButton):
+    """Botão redondo pequeno para o canto do card (expandir ↗ / recolher ↙)."""
+
+    def __init__(self, icon: str, tip: str, parent=None):
+        super().__init__(parent)
+        self._icon = icon
+        self.setFixedSize(30, 30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(tip)
+
+    def enterEvent(self, e) -> None:
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        setup(p)
+        hot = self.underMouse()
+        p.setBrush(QColor(255, 255, 255, 30 if hot else 12))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(self.rect()))
+        pm = icons.pixmap(self._icon, theme.TEXT if hot else theme.MUTED, 14, 2.1)
+        p.drawPixmap(QPointF((self.width() - 14) / 2, (self.height() - 14) / 2), pm)
+
+
 class Card(QFrame):
-    """Superfície escura arredondada com borda sutil."""
+    """Superfície escura arredondada com borda sutil. Pode virar expansível."""
+
+    expand_requested = Signal()
 
     def __init__(self, parent=None, radius=24):
         super().__init__(parent)
         self._radius = radius
+        self._hint: CornerButton | None = None
+        self._press: QPointF | None = None
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def make_expandable(self) -> None:
+        """Mostra a seta ↗ no canto; clicar nela ou no corpo do card pede a expansão."""
+        if self._hint is None:
+            self._hint = CornerButton("arrow-up-right", "Expandir", self)
+            self._hint.clicked.connect(self.expand_requested)
+            self._place_hint()
+
+    def _place_hint(self) -> None:
+        if self._hint is not None:
+            self._hint.move(self.width() - 16 - self._hint.width(), 16)
+            self._hint.raise_()
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._place_hint()
+
+    def mousePressEvent(self, e) -> None:
+        self._press = e.position() if (self._hint is not None and e.button() == Qt.MouseButton.LeftButton) else None
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:
+        press, self._press = self._press, None
+        if press is not None and (e.position() - press).manhattanLength() < 8 and self.rect().contains(e.position().toPoint()):
+            self.expand_requested.emit()
+        super().mouseReleaseEvent(e)
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
@@ -318,3 +377,57 @@ class ActionButton(QAbstractButton):
         p.setPen(fg)
         p.setFont(self.font())
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.text())
+
+
+class StatTile(QFrame):
+    """Bloco com rótulo pequeno e valor grande, usado nas visões expandidas."""
+
+    def __init__(self, label: str, value: str, color=theme.TEXT, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QVBoxLayout
+
+        self.value = Label(value, 22, W.DemiBold, color)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 14, 18, 14)
+        v.setSpacing(4)
+        v.addWidget(Label(label, 13, W.Normal, theme.MUTED))
+        v.addWidget(self.value)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        setup(p)
+        p.setBrush(QColor(theme.PANEL))
+        p.setPen(QPen(QColor(theme.PANEL_EDGE), 1))
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 16, 16)
+
+
+class LinkButton(QAbstractButton):
+    """Link em cápsula com a seta clássica ↗ (abre algo fora do app)."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self.setFont(theme.font(14, W.Medium))
+        self.setFixedHeight(38)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def sizeHint(self) -> QSize:
+        return QSize(QFontMetrics(self.font()).horizontalAdvance(self.text()) + 18 + 8 + 16 + 20, self.height())
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        setup(p)
+        rect = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
+        hot = self.underMouse()
+        p.setBrush(QColor(255, 255, 255, 16 if hot else 0))
+        p.setPen(QPen(QColor(theme.TEXT if hot else theme.OUTLINE), 1.2))
+        p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        p.setPen(QColor(theme.TEXT))
+        p.setFont(self.font())
+        tw = p.fontMetrics().horizontalAdvance(self.text())
+        x = rect.left() + 18
+        p.drawText(QRectF(x, rect.top(), tw + 2, rect.height()), Qt.AlignmentFlag.AlignVCenter, self.text())
+        # a seta dá um pequeno "salto" para cima/direita ao passar o mouse
+        off = 1.5 if hot else 0.0
+        p.drawPixmap(QPointF(x + tw + 8 + off, rect.center().y() - 8 - off), icons.pixmap("arrow-up-right", theme.TEXT, 16, 2.0))

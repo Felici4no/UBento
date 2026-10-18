@@ -29,10 +29,18 @@ class DecisionList(QWidget):
         self.lookup = lookup  # só na aba Geral: mostra de qual agente veio cada decisão
         self._offset = 0.0
         self._hover = -1
+        self.kind: str | None = None  # filtro por tipo de decisão
         self.setMouseTracking(True)
 
+    def items(self) -> list[Decision]:
+        return [d for d in self.store.decisions if self.kind in (None, d.kind)]
+
+    def set_filter(self, kind: str | None) -> None:
+        self.kind = kind
+        self.reset_scroll()
+
     def _max_offset(self) -> float:
-        return max(0.0, len(self.store.decisions) * ROW_H - self.height() + 8)
+        return max(0.0, len(self.items()) * ROW_H - self.height() + 8)
 
     def reset_scroll(self) -> None:
         self._offset = 0.0
@@ -44,7 +52,7 @@ class DecisionList(QWidget):
 
     def mouseMoveEvent(self, e) -> None:
         i = int((e.position().y() + self._offset) // ROW_H)
-        self._hover = i if 0 <= i < len(self.store.decisions) else -1
+        self._hover = i if 0 <= i < len(self.items()) else -1
         self.update()
 
     def leaveEvent(self, _e) -> None:
@@ -55,7 +63,7 @@ class DecisionList(QWidget):
         p = QPainter(self)
         setup(p)
         now = datetime.now()
-        for i, d in enumerate(self.store.decisions):
+        for i, d in enumerate(self.items()):
             y = i * ROW_H - self._offset
             if y + ROW_H < 0 or y > self.height():
                 continue

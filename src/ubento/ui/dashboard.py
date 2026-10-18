@@ -17,6 +17,7 @@ NATURAL_WIDTH = 900
 class Dashboard(QWidget):
     notify = Signal(str, bool)
     open_agent = Signal(str)
+    expand_requested = Signal(str, object)  # (tipo do card, widget do card)
 
     def __init__(self, store: Store, workspace: Workspace | None = None, parent=None):
         """Com `workspace`, vira a aba Geral: o card Agentes ocupa o lugar do Swap."""
@@ -53,6 +54,14 @@ class Dashboard(QWidget):
             bottom_left = self.exchange
             self.coin.buy_clicked.connect(lambda: self.exchange.prefill("USD", "USDC"))
         self.coin.receive_clicked.connect(lambda: self.notify.emit("Receber USDC estará disponível em breve", True))
+
+        expandable = {"crypto": self.crypto, "total": self.total, "summary": self.summary, "activity": self.activity,
+                      "decisions": self.decisions, "coin": self.coin}
+        if self.agents:
+            expandable["agents"] = self.agents
+        for kind, card in expandable.items():
+            card.make_expandable()
+            card.expand_requested.connect(lambda k=kind, c=card: self.expand_requested.emit(k, c))
 
         mid = QHBoxLayout()
         mid.setSpacing(GAP)

@@ -19,7 +19,7 @@ def app():
 
 @pytest.fixture
 def window(app):
-    w = MainWindow(Workspace())
+    w = MainWindow(Workspace(), animations=False)
     w.show()
     app.processEvents()
     yield w
@@ -157,3 +157,65 @@ def test_default_range_pref_applies_to_every_page(window):
     window.workspace.set_pref("default_range", "6M")
     for key in ["overview"] + [a.id for a in window.workspace.agents]:
         assert window.dashboard(key).total.range_key == "6M"
+
+
+@pytest.mark.parametrize("kind", ["crypto", "total", "summary", "activity", "decisions", "agents", "coin"])
+def test_every_card_expands_and_collapses(window, kind):
+    dash = window.dashboard("overview")  # só o Geral tem todos os 7 cards expansíveis
+    window.expand(dash, kind, getattr(dash, kind))
+    assert window.overlay.state == "open"
+    window.overlay.collapse(animate=False)
+    assert window.overlay.state == "closed" and not window.overlay.isVisible()
+
+
+def test_card_body_click_requests_expand(window):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    card = window.dashboard("overview").crypto
+    hits = []
+    card.expand_requested.connect(lambda: hits.append(1))
+    QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=QPoint(4, 4))
+    assert hits == [1]
+
+
+def test_swap_card_is_not_expandable(window):
+    dash = window.dashboard(window.workspace.agents[0].id)
+    assert dash.exchange._hint is None
+    assert dash.crypto._hint is not None
+
+
+def test_switching_tabs_closes_the_expanded_view(window):
+    dash = window.dashboard("overview")
+    window.expand(dash, "total", dash.total)
+    window.select(window.workspace.agents[0].id)
+    assert window.overlay.state == "closed"
+
+
+def test_agent_row_click_inside_expanded_view_opens_the_tab(window):
+    dash = window.dashboard("overview")
+    window.expand(dash, "agents", dash.agents)
+    target = window.workspace.agents[1]
+    dash.open_agent.emit(target.id)
+    assert window.current == target.id and window.overlay.state == "closed"
+
+
+def test_new_agent_tab_grows_in(app):
+    w = MainWindow(Workspace(), animations=True)
+    w.show()
+    app.processEvents()
+    agent = w.workspace.add("Nova")
+    assert agent.id in w.header._appear and w.header._appear[agent.id] < 1.0
+    w.close()
+
+
+def test_decision_filter_in_expanded_list(window):
+    from ubento.ui.cards.decisions import DecisionList
+
+    store = window.workspace.agents[0].store
+    lst = DecisionList(store)
+    total = len(lst.items())
+    lst.set_filter("swap")
+    assert len(lst.items()) == 0
+    store.execute("USD", "ETH", 500)
+    assert len(lst.items()) == 1 and len(store.decisions) == total + 1

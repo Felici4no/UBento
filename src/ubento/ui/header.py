@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QRectF, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -43,13 +43,40 @@ class TabHeader(QWidget):
         self._font = theme.font(15, W.Medium)
         self._greeting = ""
         self._hidden = False
+        self.animate = True
+        self._appear: dict[str, float] = {}
+        self._anims: dict[str, QVariantAnimation] = {}
         self.setMouseTracking(True)
         self.setFixedHeight(HEIGHT)
 
     # -- dados -------------------------------------------------------------
 
     def set_tabs(self, tabs: list[Tab], current: str) -> None:
+        known = {t.key for t in self._tabs}
         self._tabs, self._current = tabs, current
+        if known and self.animate:
+            for tab in tabs:
+                if tab.key not in known:
+                    self._grow(tab.key)
+        self.update()
+
+    def _grow(self, key: str) -> None:
+        """Aba nova: cresce de largura zero com um pequeno estouro no fim."""
+        anim = QVariantAnimation(self)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setDuration(520)
+        curve = QEasingCurve(QEasingCurve.Type.OutBack)
+        curve.setOvershoot(1.5)
+        anim.setEasingCurve(curve)
+        self._appear[key] = 0.0
+        self._anims[key] = anim
+        anim.valueChanged.connect(lambda v, k=key: self._set_appear(k, float(v)))
+        anim.finished.connect(lambda k=key: (self._appear.pop(k, None), self._anims.pop(k, None), self.update()))
+        anim.start()
+
+    def _set_appear(self, key: str, value: float) -> None:
+        self._appear[key] = value
         self.update()
 
     def set_greeting(self, name: str) -> None:
@@ -83,6 +110,7 @@ class TabHeader(QWidget):
         if need > avail > 0:  # muitas abas: encolhe todas proporcionalmente
             factor = (avail - gap * max(0, len(widths) - 1)) / sum(widths)
             widths = [max(64.0, w * factor) for w in widths]
+        widths = [w * max(0.0, self._appear.get(t.key, 1.0)) for w, t in zip(widths, self._tabs)]
         y = (HEIGHT - TAB_H) / 2
         out, x = [], left
         for tab, w in zip(self._tabs, widths):
@@ -177,6 +205,9 @@ class TabHeader(QWidget):
         rects, plus = self._rects()
         fm = QFontMetrics(self._font)
         for tab, r in rects:
+            if r.width() < 6:
+                continue
+            p.setOpacity(min(1.0, self._appear.get(tab.key, 1.0) * 1.6))
             active = tab.key == self._current
             hovered = tab.key == self._hover and not active
             if active:
@@ -202,6 +233,7 @@ class TabHeader(QWidget):
             text = fm.elidedText(tab.name, Qt.TextElideMode.ElideRight, int(r.right() - 18 - x))
             p.drawText(QRectF(x, r.top(), r.right() - x, r.height()), Qt.AlignmentFlag.AlignVCenter, text)
 
+        p.setOpacity(1.0)
         hot = self._hover == "+"
         p.setBrush(QColor(255, 255, 255, 18 if hot else 0))
         p.setPen(QPen(QColor(theme.OUTLINE), 1.2))

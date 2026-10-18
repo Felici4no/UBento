@@ -75,6 +75,7 @@ class ActivityGrid(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._weeks: list[list[tuple]] = []
+        self._scale = 1.0
         self.setMouseTracking(True)
         self.setMinimumHeight(150)
 
@@ -90,11 +91,10 @@ class ActivityGrid(QWidget):
         cell_h = min(cell_w, (self.height() - letters_h) / rows)
         return cell_w, cell_h, letters_h
 
-    @staticmethod
-    def _radius(count: int | None) -> float:
+    def _radius(self, count: int | None) -> float:
         if count is None or count == 0:
-            return 1.9
-        return min(10.0, 2.6 + count * 1.15)
+            return 1.9 * self._scale
+        return min(10.0, 2.6 + count * 1.15) * self._scale
 
     def mouseMoveEvent(self, e) -> None:
         cell_w, cell_h, _ = self._layout()
@@ -111,6 +111,7 @@ class ActivityGrid(QWidget):
         p = QPainter(self)
         setup(p)
         cell_w, cell_h, _ = self._layout()
+        self._scale = max(1.0, min(2.4, cell_w / 44))
         p.setPen(Qt.PenStyle.NoPen)
         for r, week in enumerate(self._weeks):
             for c, (day, count) in enumerate(week):

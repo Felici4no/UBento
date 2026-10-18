@@ -22,9 +22,11 @@ def _signed_money(value: float) -> str:
 class AgentList(QWidget):
     clicked = Signal(str)
 
-    def __init__(self, workspace: Workspace, parent=None):
+    def __init__(self, workspace: Workspace, detailed: bool = False, parent=None):
         super().__init__(parent)
         self.ws = workspace
+        self.detailed = detailed
+        self.row_h = ROW_H + 28 if detailed else ROW_H
         self.range_key = "1M"
         self._offset = 0.0
         self._hover = -1
@@ -38,11 +40,16 @@ class AgentList(QWidget):
         for a in self.ws.agents:
             value = a.store.total_usd()
             change, delta = self.ws.performance(a, self.range_key)
-            out.append({"id": a.id, "name": a.name, "color": a.color, "value": value, "share": value / total, "change": change, "delta": delta})
+            top = max(((sym, a.store.value_usd(sym)) for sym in a.store.holdings), key=lambda kv: kv[1], default=("", 0.0))
+            out.append({
+                "id": a.id, "name": a.name, "color": a.color, "value": value, "share": value / total,
+                "change": change, "delta": delta, "top": top[0], "top_share": top[1] / value if value else 0.0,
+                "decisions": len(a.store.decisions),
+            })
         return out
 
     def _max_offset(self) -> float:
-        return max(0.0, len(self.ws.agents) * ROW_H - (self.height() - 14) + 8)
+        return max(0.0, len(self.ws.agents) * self.row_h - (self.height() - 14) + 8)
 
     # -- interação ---------------------------------------------------------
 
@@ -51,7 +58,7 @@ class AgentList(QWidget):
         self.update()
 
     def _index_at(self, y: float) -> int:
-        i = int((y - 14 + self._offset) // ROW_H)
+        i = int((y - 14 + self._offset) // self.row_h)
         return i if 0 <= i < len(self.ws.agents) and y >= 14 else -1
 
     def mouseMoveEvent(self, e) -> None:
@@ -76,8 +83,8 @@ class AgentList(QWidget):
         setup(p)
         w = self.width()
         for i, r in enumerate(self.rows()):
-            y = 14 + i * ROW_H - self._offset
-            if y + ROW_H < 0 or y > self.height():
+            y = 14 + i * self.row_h - self._offset
+            if y + self.row_h < 0 or y > self.height():
                 continue
             self._paint_row(p, r, y, w, hovered=i == self._hover)
         fade = QLinearGradient(0, self.height() - 60, 0, self.height())
@@ -90,7 +97,7 @@ class AgentList(QWidget):
         if hovered:
             p.setBrush(QColor(255, 255, 255, 10))
             p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(-8, y - 6, w + 16, ROW_H - 4), 14, 14)
+            p.drawRoundedRect(QRectF(-8, y - 6, w + 16, self.row_h - 4), 14, 14)
         color = QColor(r["color"])
 
         p.setBrush(color)
@@ -120,6 +127,10 @@ class AgentList(QWidget):
         delta_w = fm.horizontalAdvance(delta_text)
         p.setPen(QColor(theme.MUTED))
         p.drawText(QRectF(w - delta_w - 2, y + 44, delta_w + 4, 20), Qt.AlignmentFlag.AlignVCenter, delta_text)
+        if self.detailed:
+            extra = f"Maior posição {r['top']} {pct(r['top_share'] * 100)}  ·  {r['decisions']} decisões"
+            p.setPen(QColor(theme.DIM))
+            p.drawText(QRectF(0, y + 68, w, 20), Qt.AlignmentFlag.AlignVCenter, extra)
         p.setFont(theme.font(13, W.DemiBold))
         pct_text = pct(r["change"])
         pw = p.fontMetrics().horizontalAdvance(pct_text)
@@ -145,6 +156,7 @@ class AgentsCard(Card):
         head.addWidget(Label("Agentes", 26, W.DemiBold))
         head.addStretch()
         head.addWidget(self.period, 0, Qt.AlignmentFlag.AlignBottom)
+        head.addSpacing(40)  # espaço da seta de expandir
 
         v = QVBoxLayout(self)
         v.setContentsMargins(22, 20, 22, 0)

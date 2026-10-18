@@ -2,31 +2,39 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRectF, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QLinearGradient, QPainter, QPixmap
+from PySide6.QtCore import QPoint, QPropertyAnimation, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QLinearGradient, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QFrame, QInputDialog, QMainWindow, QMenu, QMessageBox, QScrollArea, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QFrame, QGraphicsOpacityEffect, QInputDialog, QMainWindow, QMenu, QMessageBox, QScrollArea,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
-
-SETTINGS = "settings"
 from . import theme
 from .components import Toast
 from .dashboard import Dashboard
+from .expanded import build as build_expanded
 from .header import Tab, TabHeader
+from .overlay import ExpandOverlay
 from .settings import SettingsPage
+
+SETTINGS = "settings"
 
 
 class _Canvas(QWidget):
+    resized = Signal()
+
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         g = QLinearGradient(0, 0, 0, self.height())
         g.setColorAt(0, QColor(theme.BG_TOP))
         g.setColorAt(1, QColor(theme.BG_BOTTOM))
         p.fillRect(QRectF(self.rect()), g)
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self.resized.emit()  # o layout já ajustou os filhos neste ponto
 
 
 def _swatch(color: str) -> QIcon:
@@ -42,7 +50,7 @@ def _swatch(color: str) -> QIcon:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, workspace: Workspace):
+    def __init__(self, workspace: Workspace, animations: bool = True):
         super().__init__()
         self.setWindowTitle("UBento")
         self.setMinimumSize(760, 520)
@@ -50,19 +58,24 @@ class MainWindow(QMainWindow):
         self.resize(980, min(1100, (available.height() - 40) if available else 1100))
 
         self.workspace = workspace
+        self.animations = animations
         self.pages: dict[str, QScrollArea] = {}
         self.current = OVERVIEW
 
         canvas = _Canvas()
         self.setCentralWidget(canvas)
         self.header = TabHeader()
+        self.header.animate = animations
         self.stack = QStackedWidget()
         layout = QVBoxLayout(canvas)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.header)
         layout.addWidget(self.stack, 1)
+        self.overlay = ExpandOverlay(canvas)
         self.toast = Toast(canvas)
+        canvas.resized.connect(self._layout_floating)
+        QShortcut(QKeySequence("Esc"), self, activated=lambda: self.overlay.collapse())
 
         self.header.selected.connect(self.select)
         self.header.add_requested.connect(self.add_agent)
@@ -70,7 +83,7 @@ class MainWindow(QMainWindow):
         self.header.context_requested.connect(self.show_menu)
         self.header.reordered.connect(workspace.move_to)
         self.header.settings_requested.connect(lambda: self.select(SETTINGS))
-        self.header.privacy_toggled.connect(lambda: workspace.set_pref('hide_values', not workspace.pref('hide_values')))
+        self.header.privacy_toggled.connect(lambda: workspace.set_pref("hide_values", not workspace.pref("hide_values")))
         workspace.changed.connect(self.sync)
         workspace.prefs_changed.connect(self._apply_prefs)
         self._settings_page()
@@ -79,40 +92,37 @@ class MainWindow(QMainWindow):
 
     # -- páginas -----------------------------------------------------------
 
-    def _page(self, key: str, store: Store) -> QScrollArea:
-        dash = Dashboard(store, self.workspace if key == OVERVIEW else None)
-        dash.notify.connect(self.toast.show_message)
-        dash.open_agent.connect(self.select)
+    def _scroll(self, widget: QWidget) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.viewport().setAutoFillBackground(False)
-        scroll.setWidget(dash)
-        dash.setAutoFillBackground(False)  # QScrollArea liga o preenchimento; o fundo vem do canvas
+        scroll.setWidget(widget)
+        widget.setAutoFillBackground(False)  # QScrollArea liga o preenchimento; o fundo vem do canvas
         self.stack.addWidget(scroll)
-        self.pages[key] = scroll
         return scroll
+
+    def _page(self, key: str, store: Store) -> QScrollArea:
+        dash = Dashboard(store, self.workspace if key == OVERVIEW else None)
+        dash.notify.connect(self.toast.show_message)
+        dash.open_agent.connect(self.select)
+        dash.expand_requested.connect(lambda kind, card, d=dash: self.expand(d, kind, card))
+        self.pages[key] = self._scroll(dash)
+        return self.pages[key]
 
     def _settings_page(self) -> None:
         page = SettingsPage(self.workspace)
         page.notify.connect(self.toast.show_message)
         page.add_agent_requested.connect(self.add_agent)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.viewport().setAutoFillBackground(False)
-        scroll.setWidget(page)
-        page.setAutoFillBackground(False)
-        self.stack.addWidget(scroll)
-        self.pages[SETTINGS] = scroll
+        self.pages[SETTINGS] = self._scroll(page)
 
     def _apply_prefs(self) -> None:
         ws = self.workspace
-        self.header.set_greeting(ws.pref('user_name'))
-        self.header.set_hidden(ws.pref('hide_values'))
-        for key, page in self.pages.items():
-            if key != SETTINGS and ws.pref('default_range') != self.dashboard(key).total.range_key:
-                self.dashboard(key).total.set_range(ws.pref('default_range'))
+        self.header.set_greeting(ws.pref("user_name"))
+        self.header.set_hidden(ws.pref("hide_values"))
+        for key in self.pages:
+            if key != SETTINGS and ws.pref("default_range") != self.dashboard(key).total.range_key:
+                self.dashboard(key).total.set_range(ws.pref("default_range"))
 
     def dashboard(self, key: str) -> Dashboard:
         return self.pages[key].widget()  # type: ignore[return-value]
@@ -130,7 +140,7 @@ class MainWindow(QMainWindow):
         for agent in ws.agents:
             if agent.id not in self.pages:
                 self._page(agent.id, agent.store)
-                self.dashboard(agent.id).total.set_range(ws.pref('default_range'))
+                self.dashboard(agent.id).total.set_range(ws.pref("default_range"))
         if self.current not in self.pages:
             self.current = OVERVIEW
         tabs = [Tab(OVERVIEW, ws.overview_name, None)] + [Tab(a.id, a.name, a.color) for a in ws.agents]
@@ -138,10 +148,44 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.pages[self.current])
 
     def select(self, key: str) -> None:
-        if key in self.pages:
-            self.current = key
-            self.header.set_current(key)
-            self.stack.setCurrentWidget(self.pages[key])
+        if key not in self.pages:
+            return
+        self.overlay.collapse(animate=False)
+        changed = key != self.current
+        self.current = key
+        self.header.set_current(key)
+        self.stack.setCurrentWidget(self.pages[key])
+        if changed:
+            self._fade_in(self.pages[key])
+
+    def _fade_in(self, page: QWidget) -> None:
+        if not self.animations:
+            return
+        effect = QGraphicsOpacityEffect(page)
+        page.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", page)
+        anim.setDuration(260)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.finished.connect(lambda: page.setGraphicsEffect(None))  # solta o efeito: rende mais sem ele
+        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+
+    # -- expansão de cards ---------------------------------------------------
+
+    def expand(self, dash: Dashboard, kind: str, card: QWidget) -> None:
+        title, subtitle, content = build_expanded(kind, dash, self.workspace)
+
+        def card_rect() -> QRect:
+            try:
+                return QRect(self.overlay.mapFromGlobal(card.mapToGlobal(QPoint(0, 0))), card.size())
+            except RuntimeError:  # o card foi destruído (aba removida)
+                return self.overlay.rect().adjusted(200, 200, -200, -200)
+
+        self.overlay.open(title, subtitle, content, card_rect(), card.grab(), card_rect, self.animations)
+
+    def _layout_floating(self) -> None:
+        self.overlay.setGeometry(self.stack.geometry())
+        self.toast.reposition()
 
     # -- ações de configuração (botão direito) -------------------------------
 
@@ -204,7 +248,3 @@ class MainWindow(QMainWindow):
 
     def show_menu(self, key: str | None, pos: QPoint) -> None:
         self.build_menu(key).exec(pos)
-
-    def resizeEvent(self, e) -> None:
-        super().resizeEvent(e)
-        self.toast.reposition()
