@@ -7,6 +7,12 @@ provedor, a **Binance** (spot); os outros entram pelo mesmo caminho: um `Provedo
 **Escopo desta etapa:** guardar a credencial com segurança e **verificar** que a chave é somente leitura. O UBento ainda **não importa
 dados** da corretora (ordens, saldos): isso vem depois e entrará como registros externos para a conciliação.
 
+## Lugar reservado: bot do Telegram
+O catálogo já tem o **Telegram** como provedor *reservado* (`disponivel=False`): aparece em Conexões com o logo e o selo "Em breve", não se escolhe
+no diálogo e o serviço recusa conectá-lo ("ainda não está disponível"). **Nada é pedido, enviado nem guardado.** Para ativá-lo depois: declarar o
+campo do token do bot, escrever um cliente com `verificar()` (por exemplo, `getMe`), trocar `disponivel=True` e decidir o que o bot faz
+(avisos, consultas somente leitura). O token terá o mesmo tratamento da chave da Binance: só no cofre, nunca no banco, no log ou no MCP.
+
 ## O que acontece ao conectar
 1. **Validação local** (sem rede): os dois campos preenchidos, só letras e números, tamanho plausível; a mesma chave não conecta duas vezes.
 2. **Verificação na corretora** (rede, fora da thread da interface): `GET /sapi/v1/account/apiRestrictions` assinado com HMAC-SHA256. A chave só

@@ -16,7 +16,7 @@ from ubento.conexoes import CONECTADA, ERRO, REPROVADA, CofreMemoria, ServicoCon
 from ubento.metas import ServicoMetas  # noqa: E402
 from ubento.persistencia import Repositorio  # noqa: E402
 from ubento.ui import theme  # noqa: E402
-from ubento.ui.components import Label  # noqa: E402
+from ubento.ui.components import Label, PillButton  # noqa: E402
 from ubento.ui.controls import Chip  # noqa: E402
 from ubento.ui.main_window import MainWindow  # noqa: E402
 from ubento.workspace import Workspace  # noqa: E402
@@ -119,3 +119,15 @@ def test_testar_e_remover_pela_secao(janela):
     assert servico.listar() == [] and w.cofre._dados == {} and "Nenhuma conexão" in textos(secao)
     secao.testar("inexistente")
     assert "não encontrada" in avisos[-1][0]
+
+
+def test_telegram_aparece_como_em_breve_e_nao_conecta(janela):
+    w, secao, servico = janela
+    t = textos(secao)
+    assert "Telegram" in t and "Em breve" in t and "bot do Telegram" in t  # lugar reservado, visível mesmo sem conexões
+    with pytest.raises(ValueError, match="não está disponível"):
+        secao.criar_dialogo("telegram")
+    d = secao.criar_dialogo()
+    pilulas = {b.text(): b for b in d.findChildren(PillButton)}
+    assert pilulas["Binance"].isEnabled() and pilulas["Telegram · em breve"].isEnabled() is False  # aparece, mas não se escolhe
+    assert w.rede.pedidos == [] and servico.listar() == [] and w.cofre._dados == {}  # nada foi pedido nem guardado

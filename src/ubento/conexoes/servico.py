@@ -81,6 +81,8 @@ class ServicoConexoes:
         provedor = PROVEDORES.get(provedor_id)
         if provedor is None:
             raise ErroDeConfiguracao(f"provedor desconhecido: {provedor_id}")
+        if not provedor.disponivel or provedor.criar_cliente is None:
+            raise ErroDeConfiguracao(f"{provedor.nome} ainda não está disponível para conexão (em breve).")
         limpas: dict[str, str] = {}
         for campo in provedor.campos:
             valor = (credenciais.get(campo.nome) or "").strip()

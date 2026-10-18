@@ -47,6 +47,19 @@ def desenhar_logo(p: QPainter, area: QRectF, provedor_id: str, cor: str) -> None
         d = u * 2.35
         for dx, dy in ((d, 0), (-d, 0), (0, d), (0, -d)):
             losango(c.x() + dx, c.y() + dy, u * 1.0)
+    elif provedor_id == "telegram":  # círculo azul com o avião de papel
+        p.drawEllipse(area.center(), area.width() * 0.34, area.width() * 0.34)
+        c, u = area.center(), area.width() * 0.34
+        aviao = QPainterPath()
+        aviao.moveTo(QPointF(c.x() - u * 0.62, c.y() - u * 0.02))
+        aviao.lineTo(QPointF(c.x() + u * 0.62, c.y() - u * 0.46))
+        aviao.lineTo(QPointF(c.x() + u * 0.28, c.y() + u * 0.58))
+        aviao.lineTo(QPointF(c.x() - u * 0.06, c.y() + u * 0.16))
+        aviao.lineTo(QPointF(c.x() - u * 0.2, c.y() + u * 0.48))
+        aviao.lineTo(QPointF(c.x() - u * 0.24, c.y() + u * 0.12))
+        aviao.closeSubpath()
+        p.setBrush(QColor("#FFFFFF"))
+        p.drawPath(aviao)
     else:  # provedor sem logo próprio: inicial
         p.setPen(QColor(cor))
         p.setFont(theme.font(18, W.DemiBold))
@@ -99,6 +112,8 @@ class ConexaoDialog(QDialog):
         self.servico, self.provedor_id, self.sincrono = servico, provedor_id, sincrono
         self.conexao: Conexao | None = None
         provedor = PROVEDORES[provedor_id]
+        if not provedor.disponivel:
+            raise ValueError(f"{provedor.nome} ainda não está disponível para conexão")
         self.setWindowTitle("Adicionar conexão")
         self.setMinimumWidth(560)
         self.setStyleSheet(
@@ -119,11 +134,11 @@ class ConexaoDialog(QDialog):
         escolha = QHBoxLayout()
         escolha.setSpacing(6)
         for pid, pr in PROVEDORES.items():
-            b = PillButton(pr.nome, height=32, pad=14, px=13)
+            b = PillButton(pr.nome if pr.disponivel else f"{pr.nome} · em breve", height=32, pad=14, px=13)
             b.setCheckable(True)
             b.setChecked(pid == provedor_id)
+            b.setEnabled(pr.disponivel)  # o que ainda não existe aparece, mas não se escolhe
             escolha.addWidget(b)
-        escolha.addWidget(Label("mais corretoras em breve", 12, W.Normal, theme.DIM))
         escolha.addStretch(1)
 
         self.apelido = QLineEdit()
@@ -258,6 +273,9 @@ class ConexoesSection(Card):
             self._linhas.addWidget(vazio)
         for c in conexoes:
             self._linhas.addWidget(self._linha(c))
+        for pr in PROVEDORES.values():  # lugares reservados para o futuro (ex.: bot do Telegram)
+            if not pr.disponivel:
+                self._linhas.addWidget(self._reservado(pr))
 
     def _linha(self, c: Conexao) -> QWidget:
         w = QWidget()
@@ -285,6 +303,22 @@ class ConexoesSection(Card):
         remover.clicked.connect(lambda _=False, i=c.id: self.remover(i))
         h.addWidget(testar)
         h.addWidget(remover)
+        return w
+
+    def _reservado(self, pr) -> QWidget:
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 4, 0, 4)
+        h.setSpacing(12)
+        h.addWidget(LogoProvedor(pr.id, 44))
+        texto = QVBoxLayout()
+        texto.setSpacing(1)
+        texto.addWidget(Label(pr.nome, 16, W.Medium, theme.MUTED))
+        descricao = Label(pr.como_conectar, 12, W.Normal, theme.DIM)
+        descricao.setWordWrap(True)
+        texto.addWidget(descricao)
+        h.addLayout(texto, 1)
+        h.addWidget(Chip("Em breve", theme.DIM))
         return w
 
     # -- ações ---------------------------------------------------------------------------------------------------------------

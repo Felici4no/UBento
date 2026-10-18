@@ -232,3 +232,11 @@ def test_o_mcp_de_consulta_nao_enxerga_conexoes_nem_cofre():
     for arquivo in ("consulta.py", "mcp_local.py"):
         fonte = (raiz / arquivo).read_text(encoding="utf-8").lower()
         assert "conexoes" not in fonte.replace("ubento.conexoes", "") and "cofre" not in fonte and "api_secret" not in fonte, arquivo
+
+
+def test_provedor_reservado_nao_conecta_e_nao_toca_rede_nem_cofre():
+    rede, cofre = Rede(), CofreMemoria()
+    sv = servico(rede, cofre)
+    with pytest.raises(ErroDeConfiguracao, match="ainda não está disponível"):
+        sv.adicionar("telegram", "meu bot", {"token": "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
+    assert rede.pedidos == [] and cofre._dados == {} and sv.listar() == []

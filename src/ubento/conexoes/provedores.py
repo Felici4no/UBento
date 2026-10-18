@@ -25,7 +25,8 @@ class Provedor:
     cor: str
     campos: tuple[Campo, ...]
     como_conectar: str
-    criar_cliente: Callable[[dict[str, str], Transporte], Any]  # -> objeto com .verificar() -> Verificacao
+    criar_cliente: Callable[[dict[str, str], Transporte], Any] | None = None  # -> objeto com .verificar() -> Verificacao
+    disponivel: bool = True  # False = lugar reservado: aparece na tela como "em breve" e ainda não conecta
 
 
 def _binance(credenciais: dict[str, str], transporte: Transporte) -> ClienteBinance:
@@ -45,6 +46,12 @@ PROVEDORES: dict[str, Provedor] = {
             "O UBento recusa chaves com qualquer outro poder."
         ),
         criar_cliente=_binance,
+    ),
+    # Lugar reservado: não pede nem guarda nada ainda. Quando existir, entra aqui o campo do token do bot e um cliente com `verificar()`.
+    "telegram": Provedor(
+        id="telegram", nome="Telegram", descricao="Bot para avisos e consultas pelo celular", cor="#27A0DF", campos=(),
+        como_conectar="Em breve: conecte um bot do Telegram para receber avisos e consultar suas metas pelo celular. Por enquanto nada é pedido, enviado nem guardado.",
+        disponivel=False,
     ),
 }
 
