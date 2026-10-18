@@ -189,7 +189,7 @@ class ExchangeButton(QAbstractButton):
             p.setPen(QPen(QColor(255, 255, 255, 40), 1))
             p.drawRoundedRect(rect, 20, 20)
             p.setPen(QColor("white"))
-            label = "Trocar"
+            label = "Swap"
         p.setFont(self.font())
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
 
@@ -220,7 +220,7 @@ class ExchangeCard(Card):
         v = QVBoxLayout(self)
         v.setContentsMargins(18, 20, 18, 18)
         v.setSpacing(0)
-        v.addWidget(Label("Trocar", 26, W.DemiBold), 0, Qt.AlignmentFlag.AlignLeft)
+        v.addWidget(Label("Swap", 26, W.DemiBold), 0, Qt.AlignmentFlag.AlignLeft)
         v.addSpacing(8)
         v.addWidget(self.send_panel)
         v.addSpacing(6)
@@ -297,7 +297,7 @@ class ExchangeCard(Card):
         if problem:
             self.notify.emit(problem, False)
             return
-        self.notify.emit(f"Troca de {send} para {receive} concluída", True)
+        self.notify.emit(f"Swap de {send} para {receive} concluído", True)
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
