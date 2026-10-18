@@ -156,12 +156,12 @@ O avaliador não tem canal de entrada para propostas, aprovações ou alertas co
 
 | Caminho | Situação |
 | --- | --- |
-| execução → conciliação → razão → progresso → avaliação → eventos → estado | **Integrado e testado ponta a ponta** (`executar_meta`, 29 cenários) |
+| execução → conciliação → razão → progresso → avaliação → eventos → estado | **Integrado e testado ponta a ponta** (`executar_meta`, 28 cenários) |
 | Regras do contrato (bloqueio, invalidação, entrada) sobre observações | **Integrado** (motor mínimo; sem catálogo de métricas) |
 | Conciliação de **saldos** | Componente **isolado**: roda dentro do relatório, mas não alimenta o avaliador (e não deve) |
-| Persistência (SQLite) do razão, eventos e avaliações | **Não existe**: tudo é passado por parâmetro |
+| Persistência (SQLite) do razão, eventos e avaliações | **Integrada** fora do núcleo (`ubento.persistencia`, `ubento.metas`); ver `PERSISTENCIA_E_INTERFACE.md`. Os 28 cenários passam pelo banco com resultado idêntico ao do núcleo puro; uma amostra (1 a cada 4) reinicia o app no meio |
 | Monitor / agendamento / adaptadores de dados | **Não existem** (a fonte é o arquivo de reprodução) |
-| Interface do UBento | **Não conectada**: nenhuma tela usa o núcleo; os botões ✓/✕ ainda executam ao aprovar (contradiz §8 e a especificação §2) |
+| Interface do UBento | **Conectada**: tela de Metas por agente. ✓ só aprova; a execução é registro separado (`PERSISTENCIA_E_INTERFACE.md` §3). Sem formulário de execução de meta ainda |
 | Cancelamento da meta, viabilidade, análise publicada | Fora desta fase |
 | Métricas (retorno, spread, volatilidade…) e exposição conjunta | Fora desta fase |
 

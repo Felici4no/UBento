@@ -43,8 +43,8 @@ meta só pode apertar (fase 2); D11 `AprovacaoHumana` vinculada ao hash da anál
 
 Aprovar não registra compra nem aumenta o progresso. Somente uma `Execucao` confirmada faz isso.
 
-> Nota: os botões ✓/✕ da interface atual (demonstração) executam a operação ao aprovar. Isso
-> contradiz esta seção e será corrigido na integração do núcleo com a interface (fase 6).
+> Nota: os botões ✓/✕ seguem esta seção desde a integração com a interface: ✓ só marca `approved`; a execução é
+> registrada à parte, com confirmação (`PERSISTENCIA_E_INTERFACE.md` §3).
 
 ## 3. Correções técnicas
 
@@ -87,7 +87,7 @@ e cada fórmula escolhe explicitamente.
 | Validação | Pydantic v2, `extra="forbid"`, imutável |
 | YAML | `ruamel.yaml` em modo seguro; chave duplicada é erro; números fracionários sem aspas são erro |
 | Testes | `pytest` + `hypothesis` (dependência de desenvolvimento) |
-| Persistência | SQLite como adaptador, fora das funções puras (fase 5) |
+| Persistência | SQLite como adaptador, fora das funções puras (`ubento.persistencia`, ver `PERSISTENCIA_E_INTERFACE.md`) |
 | Dados da v1 | Arquivos de reprodução, com origem, horários e marca explícita de **dado simulado** |
 | Python | 3.11 ou superior |
 

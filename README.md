@@ -42,6 +42,9 @@ O **avaliador de metas** (`ubento.nucleo.avaliacao`) integra execução → conc
 carência, escopo de órfãos, orçamento com pior caso e reconciliação posterior. Contrato em
 [`docs/AVALIACAO_META.md`](docs/AVALIACAO_META.md); metas acompanhadas de ponta a ponta com dados simulados em `exemplos/avaliacao/`.
 
+A **persistência** (SQLite append-only, fora do núcleo) e a **tela de Metas** estão descritas em
+[`docs/PERSISTENCIA_E_INTERFACE.md`](docs/PERSISTENCIA_E_INTERFACE.md). Aprovar uma proposta (✓) não executa nada: a execução é registrada à parte.
+
 ```bash
 pytest tests/nucleo          # inclui testes de propriedade (Hypothesis)
 ```
@@ -60,6 +63,8 @@ estiver instalado, `Output\UBento-Setup-<versão>.exe`.
 ```
 src/ubento/
   nucleo/         núcleo de análises e metas (sem Qt)
+  persistencia/   SQLite das metas (append-only)
+  metas.py        serviço: núcleo + banco + o que a tela mostra
   store.py        estado em memória + lógica de troca (demonstração)
   formatting.py   números, moeda e datas em pt-BR
   ui/
