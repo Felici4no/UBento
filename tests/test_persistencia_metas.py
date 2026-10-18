@@ -144,3 +144,44 @@ def test_painel_traz_as_quatro_grandezas_separadas():
     p = painel.progresso
     assert painel.agente_id == "ag1" and servico.metas("ag1") == [meta_id] and servico.metas("outro") == []
     assert p.quantidade_comprovada >= 0 and p.completude is not None and p.orcamento is not None and p.elegibilidade is not None
+
+
+def test_reprocessar_apos_reiniciar_nao_duplica_nada(tmp_path):
+    caminho = next(c for c in CENARIOS if c.stem.startswith("09_"))  # tem estorno: história rica
+    db = tmp_path / "ubento.db"
+    servico = ServicoMetas(Repositorio(db))
+    meta_id = servico.importar(caminho)
+    while (passo := servico.avancar(meta_id)) is not None:
+        ultimo = passo[0]
+    antes = (servico.repo.eventos(meta_id), servico.repo.razao(meta_id), servico.painel(meta_id).estado, servico.painel(meta_id).progresso)
+    servico.repo.fechar()
+
+    servico = ServicoMetas(Repositorio(db))
+    assert (servico.repo.eventos(meta_id), servico.repo.razao(meta_id), servico.painel(meta_id).estado, servico.painel(meta_id).progresso) == antes
+    for _ in range(2):  # reprocessa os MESMOS dados, e reimporta o mesmo arquivo, depois de reiniciar
+        resultado = servico.avaliar(meta_id, ultimo.agora, ultimo.ocultar)
+        assert not resultado.eventos and not resultado.eventos_conciliacao
+        servico.importar(caminho)
+    assert (servico.repo.eventos(meta_id), servico.repo.razao(meta_id)) == antes[:2]
+    assert servico.painel(meta_id).estado is antes[2]
+
+
+def test_execucao_registrada_manualmente_nao_vira_prova_externa():
+    """Registrar uma execução (confirmação interna) NÃO a transforma em evidência conciliada: sem registro externo, não há progresso comprovado."""
+    original = carregar_reproducao_meta(next(c for c in CENARIOS if c.stem.startswith("01_")))
+    execucao = original.execucoes[0]
+    vazio = original.model_copy(update={"execucoes": (), "registros_externos": (), "coberturas_execucoes": ()})
+    servico = ServicoMetas()
+    meta_id = servico.importar(vazio)
+    ultimo = vazio.momentos[-1]
+    assert servico.avaliar(meta_id, ultimo.agora).progresso.quantidade_comprovada == 0
+
+    servico.registrar_execucao(meta_id, execucao)
+    servico.registrar_execucao(meta_id, execucao)  # clique repetido: mesma execução, nenhuma entrada nova
+    assert len(servico.repo.entradas(meta_id, "execucoes", Execucao)) == 1
+    resultado = servico.avaliar(meta_id, ultimo.agora)
+    p = resultado.progresso
+    assert p.quantidade_comprovada == 0  # confirmação manual != comprovação
+    assert p.quantidade_pendente > 0  # aparece como declarada e ainda não comprovada
+    assert not any(e.tipo.value == "execucao_conciliada" for e in resultado.eventos_conciliacao)
+    assert resultado.estado.value != "atingida"

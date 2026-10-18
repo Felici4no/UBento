@@ -354,3 +354,25 @@ def test_metas_page_imports_and_steps_and_decisions_do_not_touch_progress(window
     window.workspace.registrar_execucao(uid)
     assert window.metas.painel(page.meta_id).progresso == depois.progresso
     assert window.metas.repo.eventos(page.meta_id) == list(depois.eventos)
+
+
+def test_aprovar_nao_altera_saldos_e_registrar_repetido_nao_duplica(window):
+    ws = window.workspace
+    agent = ws.agents[0]
+    ws.set_config(agent.id, strategy="dca", mode="approve")
+    ws.run_agent(agent.id)
+    dash = window.dashboard(agent.id)
+    uid = next(d.uid for d in agent.store.decisions if d.status == "proposed")
+    saldos = dict(agent.store.holdings)
+    executadas = [d.status for d in agent.store.decisions].count("executed")
+    dash.decisions.resolve_requested.emit(uid, True)
+    dash.decisions.resolve_requested.emit(uid, True)  # segundo clique no ✓: não há mais proposta
+    assert agent.store.holdings == saldos  # aprovar não mexe em saldo
+    assert ws.pending_count(agent.id) == 1
+    dash.registrar_execucao(uid)
+    depois = dict(agent.store.holdings)
+    assert depois != saldos
+    dash.registrar_execucao(uid)  # clique repetido em "Registrar": recusado, nada se repete
+    dash.registrar_execucao(uid)
+    assert agent.store.holdings == depois
+    assert [d.status for d in agent.store.decisions].count("executed") == executadas + 1
