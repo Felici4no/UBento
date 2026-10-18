@@ -92,6 +92,7 @@ def _conciliar(arquivo: ReproducaoMeta, agora: datetime, ocultar: tuple[str, ...
     return conciliar(
         arquivo.execucoes, externos, politica=arquivo.politica_conciliacao, agora=agora, movimentacoes=arquivo.movimentacoes,
         saldos=arquivo.saldos, coberturas=arquivo.coberturas, coberturas_execucoes=arquivo.coberturas_execucoes, vinculos=arquivo.vinculos_manuais,
+        metas=[arquivo.meta],
     )
 
 

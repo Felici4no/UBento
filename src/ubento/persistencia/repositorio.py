@@ -33,7 +33,8 @@ APPEND_ONLY = ("metas", "eventos", "razao", "avaliacoes", "entradas")
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS metas (
     meta_id TEXT PRIMARY KEY, contrato_hash TEXT NOT NULL, contrato TEXT NOT NULL,
-    ativada_em TEXT NOT NULL, responsavel TEXT NOT NULL, agente_id TEXT, descricao TEXT NOT NULL
+    ativada_em TEXT NOT NULL, responsavel TEXT NOT NULL, agente_id TEXT, descricao TEXT NOT NULL,
+    cenario INTEGER NOT NULL DEFAULT 1  -- 1 = replay de cenário (o instante da avaliação vem do cenário); 0 = meta real (relógio real)
 );
 CREATE TABLE IF NOT EXISTS eventos (
     meta_id TEXT NOT NULL REFERENCES metas(meta_id), sequencia INTEGER NOT NULL, id TEXT NOT NULL, tipo TEXT NOT NULL, dados TEXT NOT NULL,
@@ -134,6 +135,9 @@ class Repositorio:
         if "detalhes" not in colunas:
             self.con.execute("ALTER TABLE conexoes ADD COLUMN detalhes TEXT NOT NULL DEFAULT '{}'")
             self.con.commit()
+        if "cenario" not in {r[1] for r in self.con.execute("PRAGMA table_info(metas)")}:  # tudo o que já existia veio de cenário
+            self.con.execute("ALTER TABLE metas ADD COLUMN cenario INTEGER NOT NULL DEFAULT 1")
+            self.con.commit()
 
     def fechar(self) -> None:
         self.con.close()
@@ -172,7 +176,7 @@ class Repositorio:
 
     # -- metas ------------------------------------------------------------------------------------------------------
 
-    def importar(self, arquivo: ReproducaoMeta, ativacao: Ativacao, agente_id: str | None = None) -> bool:
+    def importar(self, arquivo: ReproducaoMeta, ativacao: Ativacao, agente_id: str | None = None, cenario: bool = True) -> bool:
         """Registra o contrato, a ativação e as entradas. Idempotente: importar de novo não muda nada. Devolve se criou."""
         meta = arquivo.meta
         h = hash_contrato(meta)
@@ -183,8 +187,8 @@ class Repositorio:
             criou = atual is None
             if criou:
                 self.con.execute(
-                    "INSERT INTO metas VALUES (?,?,?,?,?,?,?)",
-                    (meta.id, h, meta.model_dump_json(), ativacao.ativada_em.isoformat(), ativacao.responsavel, agente_id, arquivo.descricao),
+                    "INSERT INTO metas (meta_id, contrato_hash, contrato, ativada_em, responsavel, agente_id, descricao, cenario) VALUES (?,?,?,?,?,?,?,?)",
+                    (meta.id, h, meta.model_dump_json(), ativacao.ativada_em.isoformat(), ativacao.responsavel, agente_id, arquivo.descricao, int(cenario)),
                 )
                 self.con.execute("INSERT INTO cursor VALUES (?, 0)", (meta.id,))
             for campo in CAMPOS_ENTRADA:
@@ -232,6 +236,11 @@ class Repositorio:
 
     def metas_ids(self) -> list[str]:
         return [r["meta_id"] for r in self.con.execute("SELECT meta_id FROM metas ORDER BY rowid")]
+
+    def meta_e_cenario(self, meta_id: str) -> bool:
+        """Meta de replay (dado simulado, instante vindo do cenário) ou meta real (relógio real)?"""
+        r = self.con.execute("SELECT cenario FROM metas WHERE meta_id = ?", (meta_id,)).fetchone()
+        return True if r is None else bool(r["cenario"])
 
     def agente_da_meta(self, meta_id: str) -> str | None:
         r = self.con.execute("SELECT agente_id FROM metas WHERE meta_id = ?", (meta_id,)).fetchone()

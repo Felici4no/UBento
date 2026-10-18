@@ -295,10 +295,14 @@ class MetasPage(QWidget):
         if self.meta_id is None:
             return
         painel = self.servico.painel(self.meta_id)
-        if painel.avaliacao is None:
+        if painel.avaliacao is None and painel.cenario:
             self.notify.emit("Avalie um momento primeiro", False)
             return
-        resultado = self.servico.avaliar(self.meta_id, painel.avaliacao.avaliada_em)
+        try:
+            resultado = self.servico.reavaliar(self.meta_id)  # meta real: horário real (UTC); cenário: o instante do cenário
+        except Exception as erro:
+            self.notify.emit(f"Não foi possível reavaliar: {str(erro)[:140]}", False)
+            return
         self.notify.emit("Reavaliada: nenhum evento novo (sem duplicação)" if not resultado.eventos else f"{len(resultado.eventos)} evento(s) novo(s)", True)
         self.refresh()
 
@@ -330,7 +334,7 @@ class MetasPage(QWidget):
         painel = self.servico.painel(self.meta_id)
         self.avancar.setEnabled(painel.pode_avancar)
         self.avancar.setText(f"Avançar momento ({painel.proximo_momento}/{painel.momentos_total})")
-        self.reavaliar.setEnabled(painel.avaliacao is not None)
+        self.reavaliar.setEnabled(painel.avaliacao is not None or not painel.cenario)
         self.avancar.update()
         self.reavaliar.update()
         for bloco in self._blocos(painel):
@@ -372,6 +376,11 @@ class MetasPage(QWidget):
         v.addWidget(_texto(painel.descricao, theme.TEXT, 14))
         v.addWidget(_linha("Ativo", painel.ativo_id))
         v.addWidget(_linha("Prazo", f"{painel.prazo:%d/%m/%Y %H:%M} UTC"))
+        if painel.avaliacao is not None:
+            origem = "instante do cenário (replay)" if painel.cenario else "relógio real"
+            v.addWidget(_linha("Última avaliação", f"{painel.avaliacao.avaliada_em:%d/%m/%Y %H:%M} UTC · {origem}"))
+        v.addWidget(_texto("A meta não expira nem se reavalia sozinha: a avaliação só acontece quando você registra uma execução, vincula ou corrige um vínculo, "
+                           "importa evidência, usa Reavaliar ou Avançar momento. Consultas (MCP, Telegram) nunca reavaliam.", theme.DIM, 12))
         blocos.append(resumo)
         if p is None:
             vazio, vv = _bloco("AINDA NÃO AVALIADA")

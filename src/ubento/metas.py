@@ -7,8 +7,9 @@ Nada aqui decide regra de negócio: isso é do núcleo. Aqui só se orquestra, p
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -69,6 +70,7 @@ class PainelMeta:
     proximo_momento: int
     ativo_id: str
     prazo: datetime
+    cenario: bool = True  # True: o instante das avaliações vem do cenário (replay); False: do relógio real, com fuso
     fonte_simulada: bool = True
 
     @property
@@ -107,16 +109,24 @@ class _Reivindicacao:
     alocada: Decimal | None  # None = o registro externo inteiro
 
 
+def agora_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class ServicoMetas:
-    def __init__(self, repositorio: Repositorio | None = None):
+    """`relogio` fornece o horário REAL (com fuso) às metas reais. Metas de cenário (replay) nunca o consultam: o instante vem do cenário.
+    Nada avalia sozinho: o relógio só é lido quando alguém pede uma avaliação (registrar, vincular, importar evidência, reavaliar)."""
+
+    def __init__(self, repositorio: Repositorio | None = None, relogio: Callable[[], datetime] = agora_utc):
         self.repo = repositorio or Repositorio()
+        self.relogio = relogio
 
     # -- entrada --------------------------------------------------------------------------------------------------------
 
-    def importar(self, origem: str | Path | ReproducaoMeta, agente_id: str | None = None) -> str:
+    def importar(self, origem: str | Path | ReproducaoMeta, agente_id: str | None = None, cenario: bool = True) -> str:
         """Importa um cenário (dado SIMULADO) e ativa a meta. Idempotente. Devolve o id da meta."""
         arquivo = origem if isinstance(origem, ReproducaoMeta) else carregar_reproducao_meta(origem)
-        self.repo.importar(arquivo, ativacao_de(arquivo), agente_id)
+        self.repo.importar(arquivo, ativacao_de(arquivo), agente_id, cenario)
         return arquivo.meta.id
 
     @_exclusivo
@@ -221,8 +231,7 @@ class ServicoMetas:
         if any((c.meta_id, c.execucao_id) == (meta_id, execucao_id) for c in self._reivindicacoes().get((fonte_id, id_externo), [])):
             return False  # mesmo vínculo já vigente: nada se duplica
         self._checar_exclusividade((fonte_id, id_externo), meta_id, execucao_id, None)
-        ultima = self.repo.ultima_avaliacao(meta_id)
-        em = max(i for i in (ultima[0].avaliada_em if ultima else None, execucao.confirmada_em, *(r.recebido_em for r in registros)) if i is not None)
+        em = max(self.instante_de_avaliacao(meta_id), execucao.confirmada_em, *(r.recebido_em for r in registros))
         vinculo = VinculoManual(execucao_id=execucao_id, fonte_id=fonte_id, id_externo=id_externo, autor=autor.strip(), justificativa=justificativa.strip(), em=em)
         self.repo.registrar_entrada(meta_id, "vinculos_manuais", vinculo)
         self.reavaliar(meta_id, em)
@@ -257,8 +266,7 @@ class ServicoMetas:
 
     def _instante_da_correcao(self, meta_id: str, original: VinculoManual) -> datetime:
         """Estritamente depois do vínculo corrigido (a correção nunca reescreve o instante em que ele valia) e nunca antes da última avaliação."""
-        ultima = self.repo.ultima_avaliacao(meta_id)
-        return max(ultima[0].avaliada_em if ultima else original.em, original.em + timedelta(seconds=1))
+        return max(self.instante_de_avaliacao(meta_id), original.em + timedelta(seconds=1))
 
     @_exclusivo
     def revogar_vinculo(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str, autor: str, justificativa: str) -> bool:
@@ -316,12 +324,25 @@ class ServicoMetas:
             novos += self.repo.registrar_entrada(meta_id, "coberturas_execucoes", c)
         return novos
 
-    def reavaliar(self, meta_id: str, no_minimo: datetime | None = None) -> ResultadoAvaliacao:
-        """Reavalia no instante de referência: o mais tardio entre a última avaliação e `no_minimo` (nunca o relógio do sistema)."""
+    def _agora_real(self) -> datetime:
+        agora = self.relogio()
+        if agora.tzinfo is None or agora.utcoffset() is None:
+            raise ValueError("o relógio precisa devolver um horário com fuso explícito (ex.: UTC)")
+        return agora.astimezone(timezone.utc)
+
+    def instante_de_avaliacao(self, meta_id: str, no_minimo: datetime | None = None) -> datetime:
+        """De onde vem o `agora` de uma avaliação pedida:
+          - meta de CENÁRIO (replay): o instante do cenário (o mais tardio entre a última avaliação e `no_minimo`); o relógio do sistema não é lido;
+          - meta REAL: o horário real (UTC), nunca antes da última avaliação (o tempo das avaliações não anda para trás) nem de `no_minimo`."""
         ultima = self.repo.ultima_avaliacao(meta_id)
-        instantes = [i for i in (ultima[0].avaliada_em if ultima else None, no_minimo) if i is not None]
-        _, ativacao = self.repo.carregar_meta(meta_id)
-        return self.avaliar(meta_id, max(instantes, default=ativacao.ativada_em))
+        base = [i for i in (ultima[0].avaliada_em if ultima else None, no_minimo) if i is not None]
+        if self.repo.meta_e_cenario(meta_id):
+            return max(base, default=self.repo.carregar_meta(meta_id)[1].ativada_em)
+        return max([self._agora_real(), *base])
+
+    def reavaliar(self, meta_id: str, no_minimo: datetime | None = None) -> ResultadoAvaliacao:
+        """Reavalia no instante dado por `instante_de_avaliacao` (relógio real nas metas reais, instante do cenário nos replays)."""
+        return self.avaliar(meta_id, self.instante_de_avaliacao(meta_id, no_minimo))
 
     # -- avaliação ------------------------------------------------------------------------------------------------------
 
@@ -335,6 +356,7 @@ class ServicoMetas:
         vinculos = list(r.entradas(meta_id, "vinculos_manuais", VinculoManual))
         revogacoes = list(r.entradas(meta_id, "revogacoes_vinculos", RevogacaoVinculo))
         coberturas = list(r.entradas(meta_id, "coberturas_execucoes", CoberturaExecucoes))
+        metas = [r.carregar_meta(meta_id)[0]]
         for outra in r.metas_ids():
             if outra == meta_id:
                 continue
@@ -342,6 +364,7 @@ class ServicoMetas:
             if not execs:
                 continue
             pre = f"{outra}::"
+            metas.append(r.carregar_meta(outra)[0])  # o contexto (ativo, moeda, mercado, conta) de cada meta que entra na conciliação
             execucoes += [e.model_copy(update={"id": pre + e.id, "estorna_execucao_id": pre + e.estorna_execucao_id if e.estorna_execucao_id else None}) for e in execs]
             novos_ids: dict[str, str] = {}
             vinculos_outra = []
@@ -358,18 +381,18 @@ class ServicoMetas:
             chaves = {(x.fonte_id, x.id_externo) for e in execs for x in e.referencias_externas} | {(v.fonte_id, v.id_externo) for v in vinculos_outra}
             externos += [x for x in r.entradas(outra, "registros_externos", RegistroExterno) if x.chave in chaves]
             coberturas += r.entradas(outra, "coberturas_execucoes", CoberturaExecucoes)
-        return execucoes, externos, vinculos, revogacoes, coberturas
+        return execucoes, externos, vinculos, revogacoes, coberturas, metas
 
     def avaliar(self, meta_id: str, agora: datetime, ocultar: tuple[str, ...] = ()) -> ResultadoAvaliacao:
         meta, ativacao = self.repo.carregar_meta(meta_id)
         r = self.repo
-        execucoes, externos, vinculos, revogacoes, coberturas_execucoes = self._insumos_conjuntos(meta_id, ocultar)
-        politica = r.entradas(meta_id, "politica_conciliacao", PoliticaConciliacao)[0]
+        execucoes, externos, vinculos, revogacoes, coberturas_execucoes, metas = self._insumos_conjuntos(meta_id, ocultar)
+        politica = r.entradas(meta_id, "politica_conciliacao", PoliticaConciliacao)[-1]  # a política mais recente (reimportar um cenário a atualiza)
         relatorio = conciliar(
             execucoes, externos, politica=politica, agora=agora,
             movimentacoes=r.entradas(meta_id, "movimentacoes", Movimentacao), saldos=r.entradas(meta_id, "saldos", SaldoObservado),
             coberturas=r.entradas(meta_id, "coberturas", Cobertura), coberturas_execucoes=coberturas_execucoes,
-            vinculos=vinculos, revogacoes=revogacoes,
+            vinculos=vinculos, revogacoes=revogacoes, metas=metas,
         )
         snapshot = Snapshot(observacoes=tuple(o for o in r.entradas(meta_id, "observacoes", Observacao) if o.coletado_em <= agora))
         resultado = avaliar_meta(meta, ativacao, r.eventos(meta_id), r.razao(meta_id), relatorio, snapshot, agora)
@@ -417,7 +440,7 @@ class ServicoMetas:
             meta_id=meta_id, descricao=self.repo.descricao(meta_id), agente_id=self.repo.agente_da_meta(meta_id),
             estado=ultima[0].estado if ultima else None, avaliacao=ultima[0] if ultima else None, progresso=ultima[1] if ultima else None,
             eventos=tuple(self.repo.eventos(meta_id)), execucoes=tuple(registradas), moeda_cotacao_id=meta.objetivo.moeda_cotacao_id, momentos_total=len(self.repo.momentos(meta_id)),
-            proximo_momento=self.repo.cursor(meta_id), ativo_id=_ativo(meta), prazo=meta.objetivo.prazo,
+            proximo_momento=self.repo.cursor(meta_id), ativo_id=_ativo(meta), prazo=meta.objetivo.prazo, cenario=self.repo.meta_e_cenario(meta_id),
         )
 
 

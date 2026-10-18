@@ -51,7 +51,7 @@ Ordem de aplicação, para cada execução interna:
 
 1. **Higiene dos registros internos.** Mesmo `id` com conteúdo idêntico: um só registro (duplicata inócua, anotada). Mesmo `id` com conteúdo diferente: todos os registros daquele `id` ficam fora do cálculo e viram `revisao`.
 2. **Visibilidade temporal.** Só entra o que tem `recebido_em <= agora`. Reprocessar "como estava" em um instante passado reproduz o resultado daquele instante.
-3. **Versões externas.** Registros com a mesma chave `(fonte_id, id_externo)` formam uma história. Vale a maior `versao`. Duas versões iguais com conteúdo idêntico são uma só; com conteúdo diferente, a chave é **conflitante** e quem a usa vai para `revisao`.
+3. **Versões externas.** Registros com a mesma chave `(fonte_id, id_externo)` formam uma história. Vale a maior `versao`. Três coisas diferentes: a **identidade** da operação (`fonte_id` + `id_externo`), o **conteúdo** (quantidade, preço, taxas, status, horário da execução, conta, mercado, origem; a ordem das taxas não conta) e o **recebimento** (`recebido_em`: quando chegou, não o que aconteceu). Na versão mais alta, cópias com o mesmo conteúdo são a **mesma operação reimportada**: vale a **primeira chegada** (menor `recebido_em`), a reimportação é só anotada (`registro_externo_reimportado`) e nada é revertido. Conteúdo diferente na mesma versão é **conflito** real e quem usa a chave vai para `revisao`. Todas as chegadas continuam guardadas (rastreabilidade).
 4. **Identificador estável.** A correspondência é feita **somente** por `referencias_externas` (ou `VinculoManual`). Preço, horário e quantidade **nunca** criam um elo.
 5. **Sem referência.** A execução vai para `revisao` (`sem_identificador_externo`). O módulo pode listar **candidatos** (mesmo ativo e lado, quantidade e horário dentro da política) apenas como sugestão para a pessoa; eles não viram elo e não contam.
 6. **Referência sem registro.** Dentro de `janela_atraso_segundos` após `confirmada_em`: `pendente` (dado pode estar atrasado). Depois disso a ausência **só é prova** se uma `CoberturaExecucoes` da mesma fonte e ativo cobria o período da execução (± tolerância de horário) e a consulta foi feita depois de a fonte ter tido tempo de publicar: então `sem_registro_externo`. **Sem cobertura: `nao_verificavel`**, que não confirma nem desmente a execução. Idade da execução, validade do dado e cobertura da consulta são conceitos diferentes (ver `AVALIACAO_META.md` §2.1).
@@ -87,7 +87,7 @@ Cada diferença gera um item `(campo, valor interno, valor externo)` e um motivo
 | `divergente` | Há correspondência por ID, mas algum campo difere ou o registro foi cancelado | Não |
 | `pendente` | Falta registro ou ele ainda está `pendente`, dentro da janela de atraso | Não |
 | `sem_registro_externo` | Ausência **provada**: a consulta cobria o período e a janela de atraso passou | Não |
-| `nao_verificavel` | Ausência **não provada** (sem cobertura da consulta); se havia prova anterior, o avaliador a preserva | Não |
+| `nao_verificavel` | Ausência **não provada** (sem cobertura da consulta), **ou contexto indeterminado** (conta ausente) **ou fonte não autorizada** (§11); se havia prova anterior, o avaliador a preserva | Não |
 | `revisao` | Correspondência ambígua, conflitante ou sem identificador; exige decisão humana | Não |
 
 Motivos (códigos estáveis): `aguardando_registro_externo`, `registro_externo_pendente`, `registro_externo_nao_encontrado`,
@@ -97,7 +97,7 @@ Motivos (códigos estáveis): `aguardando_registro_externo`, `registro_externo_p
 `taxa_no_ativo_diferente`, `quantidade_liquida_diferente`, `preco_diferente`, `taxa_na_cotacao_diferente`,
 `taxa_outro_ativo_nao_registrada`, `taxa_outro_ativo_diferente`, `horario_fora_da_tolerancia`,
 `estorno_sem_original`, `estorno_de_outra_meta`, `estorno_de_original_nao_conciliada`, `estorno_excede_original`,
-`estorno_externo_aponta_para_outra_execucao`. Informativo (não bloqueia): `corrigido_externamente`, `duplicata_identica`.
+`estorno_externo_aponta_para_outra_execucao`. Contexto da meta (§11): `ativo_da_meta_diferente`, `moeda_da_meta_diferente`, `mercado_da_meta_diferente`, `conta_da_meta_diferente`, `origem_diferente`, `contexto_indeterminado`, `fonte_nao_autorizada`, `fonte_autorizada_nao_definida`. Informativo (não bloqueia): `corrigido_externamente`, `duplicata_identica`, `registro_externo_reimportado`.
 
 ### 5.2 Registro externo sem execução interna
 
@@ -161,7 +161,34 @@ o prazo original.
 - Alocação proporcional da taxa assume que a taxa do registro é distribuída pela quantidade; fontes que cobram taxa mínima por registro podem exigir `VinculoManual` ou tolerância.
 - O fuso e o relógio entram sempre como parâmetro (`agora`); este módulo nunca lê o horário do sistema.
 - Candidatos sugeridos são heurísticos e só servem para orientar uma pessoa.
+- **A mesma operação real vista por duas fontes não é unida.** A identidade é por fonte, e não há um identificador confiável da mesma operação entre fontes. Por isso só a fonte autorizada comprova (§11); a outra serve para comparação e nunca soma. Unir por semelhança de horário, preço e quantidade foi rejeitado de propósito.
 
 ## 10. Revogação de vínculo manual
 
 `RevogacaoVinculo` corrige um `VinculoManual` sem apagá-lo: guarda `vinculo_id` (hash do conteúdo do vínculo, `id_do_vinculo`), autor, justificativa (mínimo 10 caracteres), instante `em` e, numa substituição, `substituido_por_id`. `conciliar(..., revogacoes=...)` usa `vinculos_vigentes`: um vínculo vale em `agora` se já foi decidido e não foi revogado em instante posterior ao dele e `<= agora`. Efeitos: reproduzir um instante anterior à revogação reproduz o resultado de então; revogação anterior ou igual ao instante do vínculo é ignorada; o hash das entradas só inclui revogações quando existem (relatórios sem elas mantêm o hash de antes). Sem o vínculo, a execução volta a depender de referência declarada ou de novo vínculo.
+
+## 11. Contexto da meta, origem e fonte autorizada
+
+Quando a conciliação conhece as metas (`conciliar(..., metas=[...])`, sempre o caso no app), cada execução é conferida contra o contexto do contrato:
+
+| Verificação | Regra | Resultado |
+| --- | --- | --- |
+| Ativo | execução e registro têm o ativo do objetivo | diferente: `divergente` (`ativo_da_meta_diferente`), com ou sem evidência |
+| Moeda de cotação | a da execução (se declarada) e a do registro são as do objetivo | diferente: `divergente` (`moeda_da_meta_diferente`) |
+| Mercado | o do registro é o do contrato | diferente: `divergente` (`mercado_da_meta_diferente`) |
+| Conta | o registro e o contrato dizem a conta e ela é a mesma | diferente: `divergente` (`conta_da_meta_diferente`); **ausente** num dos lados: `nao_verificavel` (`contexto_indeterminado`) |
+| Origem | execução e registro têm a **mesma** origem | veja a matriz abaixo |
+| Fonte | a fonte do registro é a autorizada para a (conta, mercado) da meta | outra fonte: `nao_verificavel` (`fonte_nao_autorizada`); nenhuma definida: `nao_verificavel` (`fonte_autorizada_nao_definida`) |
+
+- **Explícito vence indeterminado.** Incompatibilidade explícita (dado presente dos dois lados e diferente) nunca comprova e contradiz a prova anterior. Contexto obrigatório ausente é indeterminado: não conta e não contradiz.
+- **Origem (combinações permitidas):**
+
+| Execução | Evidência | Pode comprovar? |
+| --- | --- | --- |
+| observada | observada | sim |
+| simulada | simulada | sim (replay, testes e demonstração) |
+| observada | simulada | **não** (`origem_diferente`): evidência simulada não comprova execução real |
+| simulada | observada | **não**: simulação e operação real não se misturam |
+
+- **Fonte autorizada** (`PoliticaConciliacao.fontes_autorizadas`: lista de `(conta_id, mercado_id, fonte_id)`): só ela comprova. Outras fontes podem ser **importadas para comparação**; execuções que as referenciam (ou que misturam fontes) ficam `nao_verificavel` e **não somam progresso**. Registros sem execução de uma fonte não autorizada não bloqueiam a meta (o avaliador os trata como irrelevantes, `fonte_nao_autorizada`).
+- O relatório lista as metas que validou (`metas_validadas`); o avaliador **recusa** um relatório que não validou o contexto da meta que avalia. Sem `metas`, a conciliação se comporta como antes e quem a usa fica responsável pelo contexto.

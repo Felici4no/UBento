@@ -77,9 +77,9 @@ Monitor/agendamento e adaptadores de dados reais; conversão entre moedas; cance
 
 ### 7.1 Identidade de um registro externo
 - A **chave** é `(fonte_id, id_externo)` (`RegistroExterno.chave`). A **conta** (`conta_id`) é um atributo do registro e **não** faz parte da identidade; o mesmo id em **outra fonte** é outra operação.
-- **Reimportação da mesma operação:** conteúdo idêntico (mesma chave, mesma versão) é a mesma operação. O banco não grava de novo (`entradas` deduplica por hash do conteúdo) e a conciliação também a deduplica (`importar_evidencia` devolve 0 novos).
+- **Reimportação da mesma operação:** a identidade é `(fonte, id)`; o conteúdo exclui o metadado de recebimento (`recebido_em`) e a ordem das taxas. Mesma chave, mesma versão e mesmo conteúdo, mesmo com outro `recebido_em`, é **a mesma operação**: vale a primeira chegada, a reimportação é anotada (`registro_externo_reimportado`) e **nada é revertido**. O banco guarda cada importação (rastreabilidade); a conciliação as une.
 - **Correção pela fonte:** a mesma chave com `versao` maior. As versões antigas ficam guardadas; vale a mais alta e a execução é reconciliada contra ela.
-- **Mesma chave e mesma versão com conteúdo diferente** (inclusive só a conta): conflito. O registro fica em revisão e nada é comprovado por ele.
+- **Mesma chave e mesma versão com conteúdo diferente** (quantidade, preço, taxa, status, conta…): conflito. O registro fica em revisão e nada é comprovado por ele.
 - Testes: `tests/test_identidade_registro.py`.
 
 ### 7.2 Alocações simultâneas
@@ -92,3 +92,23 @@ Monitor/agendamento e adaptadores de dados reais; conversão entre moedas; cance
 - **Antes:** vincular, revogar ou substituir reavaliava só a meta de quem corrigiu. Outra meta que dependia daquela quantidade (disputa que se resolve, ou registro que volta a ser órfão) continuava com o resultado antigo até alguém reavaliá-la.
 - **Agora:** depois de vincular, revogar, substituir ou registrar execução com referência declarada, o serviço reavalia **toda outra meta que já tenha avaliação** e que reivindique o registro ou o tenha importado, no instante de referência (nunca o relógio do sistema). Metas nunca avaliadas não são avaliadas por tabela. `importar_evidencia` não reavalia nada (a evidência só vale quando alguém vincula, registra ou reavalia).
 - Testes (`tests/test_correcao_vinculo.py`): liberar e tomar um registro muda os órfãos da outra meta; revogar numa meta resolve a disputa da outra (que passa a comprovar).
+
+## 8. Relógio e quais ações disparam uma avaliação
+
+`agora` continua sendo **parâmetro** do núcleo; quem o fornece é o serviço (`ServicoMetas`):
+
+| Meta | De onde vem o instante da avaliação |
+| --- | --- |
+| **Cenário** (replay, dado simulado; é o que se importa hoje) | o instante do cenário (o mais tardio entre a última avaliação e o dado novo). O relógio do sistema **nunca é lido** |
+| **Real** (`importar(..., cenario=False)`) | o horário real em **UTC com fuso explícito**, nunca antes da última avaliação (o tempo das avaliações não anda para trás). Relógio sem fuso é recusado; horário anterior à ativação vira um aviso explicado |
+
+**Nada avalia sozinho.** Passar o horário real ao pedir uma avaliação não faz a meta expirar sozinha: o tempo só é aplicado quando alguém pede. As ações que disparam uma avaliação são:
+registrar execução, importar evidência, vincular / revogar / substituir vínculo (e, por consequência, as outras metas que enxergam o mesmo registro), **Reavaliar** e **Avançar momento** (replay: usa o instante do cenário). **Consultas (MCP, Telegram) nunca avaliam.** Não existe agendamento nesta versão (ficou para depois). A tela mostra a data da última avaliação e a origem do instante ("relógio real" ou "instante do cenário"); o MCP devolve o mesmo em `ultima_avaliacao.instante_vem_de`.
+
+## 9. Garantias e limitações da primeira versão
+
+- **Uma fonte de comprovação autorizada por (conta, mercado)**, declarada em `PoliticaConciliacao.fontes_autorizadas`. Outra fonte pode ser importada para comparação, mas não soma progresso. **Limitação:** não se unem operações por semelhança de horário, preço e quantidade; até existir um identificador confiável da mesma operação entre fontes, a mesma compra vista por duas fontes só conta pela autorizada.
+- Evidência simulada não comprova execução real (nem o inverso); conta ausente deixa a execução indeterminada (`CONCILIACAO.md` §11).
+- O orçamento cobre o custo total e fica indeterminado com taxa em terceiro ativo; limites obrigatórios não implementados impedem declarar a meta cumprida (`AVALIACAO_META.md` §4).
+- **A evidência continua sendo arquivo fornecido por quem usa o app**: `origem`, `fonte_id` e `recebido_em` são autodeclarados. O núcleo confere campos e contexto, mas não prova autenticidade. Isso só muda com conectores que tragam a evidência direto da fonte.
+- Bancos criados antes desta versão com cenários simulados precisam reimportar o cenário regenerado (a política passa a exigir a fonte autorizada); a política mais recente importada é a usada.

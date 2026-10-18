@@ -92,7 +92,9 @@ Efeito de um órfão **relevante**:
 
 O contrato ganhou `mercado.conta_id` (opcional). O campo `conta_id` do registro externo identifica a conta na fonte.
 
-## 4. Orçamento: limite obrigatório com pior caso explícito
+## 4. Orçamento: custo total, com pior caso explícito
+
+O orçamento cobre o **custo total** (não só o desembolso): valor pago e taxas na moeda de cotação, mais o custo fixo como pior caso. A taxa cobrada **no ativo comprado** não é custo à parte (já reduz a quantidade e o valor pago é o dos brutos). A taxa em **terceiro ativo** não é convertida (não há cotação confiável): havendo uma, o orçamento **nunca é declarado satisfeito** (`indeterminado`, motivo `taxa_em_terceiro_ativo_sem_conversao`), a menos que o gasto já conhecido demonstre o estouro (`falso`).
 
 Na moeda do orçamento (`recursos.moeda_orcamento_id`):
 
@@ -105,8 +107,16 @@ Na moeda do orçamento (`recursos.moeda_orcamento_id`):
 | `verdadeiro` | o gasto **máximo** cabe no orçamento |
 | `indeterminado` | caso contrário (a diferença é custo sem evidência), ou moeda incompatível ou desconhecida |
 
-`custo_fixo_real` **não** é apresentado como verificado: aparece em `custos[].nao_verificado`. A exposição máxima
-(`recursos.exposicao_maxima`) **não** é avaliada nesta fase (exige valoração da carteira).
+`custo_fixo_real` **não** é apresentado como verificado: aparece em `custos[].nao_verificado`.
+
+### 4.1 Campos do contrato que o motor ainda não avalia
+
+| Campo | Tratamento |
+| --- | --- |
+| `recursos.exposicao_maxima` | **limite obrigatório quando menor que 1** (1 = sem limite). Configurado e não implementado, **não aparece como cumprido**: a elegibilidade fica `indeterminado` (`limite_nao_avaliado`) e a meta não se declara atingida. Aparece em `limites_nao_avaliados` |
+| `recursos.saldo_reservado`, `custos.custo_fixo`, `custos.taxa_proporcional`, `custos.tratamento_taxa` | informativos (modelo de custo previsto e reserva): nada os avalia; o custo **real** vem das execuções |
+
+Todos aparecem em `campos_nao_avaliados`, em cada avaliação.
 
 ## 5. Estado, carência e expiração
 
@@ -159,6 +169,7 @@ O avaliador não tem canal de entrada para propostas, aprovações ou alertas co
 | execução → conciliação → razão → progresso → avaliação → eventos → estado | **Integrado e testado ponta a ponta** (`executar_meta`, 28 cenários) |
 | Regras do contrato (bloqueio, invalidação, entrada) sobre observações | **Integrado** (motor mínimo; sem catálogo de métricas) |
 | Conciliação de **saldos** | Componente **isolado**: roda dentro do relatório, mas não alimenta o avaliador (e não deve) |
+| Contexto da meta (ativo, moeda, mercado, conta, origem) e fonte autorizada | **Valem no núcleo** (`CONCILIACAO.md` §11); o avaliador recusa relatório que não os validou |
 | Persistência (SQLite) do razão, eventos e avaliações | **Integrada** fora do núcleo (`ubento.persistencia`, `ubento.metas`); ver `PERSISTENCIA_E_INTERFACE.md`. Os 28 cenários passam pelo banco com resultado idêntico ao do núcleo puro; uma amostra (1 a cada 4) reinicia o app no meio |
 | Monitor / agendamento / adaptadores de dados | **Não existem** (a fonte é o arquivo de reprodução) |
 | Interface do UBento | **Conectada**: tela de Metas por agente. ✓ só aprova; a execução é registro separado (`PERSISTENCIA_E_INTERFACE.md` §3). Sem formulário de execução de meta ainda |

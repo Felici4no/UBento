@@ -120,7 +120,7 @@ def test_meta_cancelada_nunca_e_recalculada():
     arquivo = montar([ex("ex-1", "10")], [ext("fill-1", "10")], ["11:00:00"])
     from ubento.nucleo.conciliacao import conciliar
 
-    rel = conciliar(arquivo.execucoes, arquivo.registros_externos, politica=arquivo.politica_conciliacao, agora=instante("11:00:00"))
+    rel = conciliar(arquivo.execucoes, arquivo.registros_externos, politica=arquivo.politica_conciliacao, agora=instante("11:00:00"), metas=[arquivo.meta])
     historia = [_ev(1, TipoEvento.ATIVADA), _ev(2, TipoEvento.CANCELADA)]
     r = avaliar_meta(arquivo.meta, ativacao_de(arquivo), historia, [], rel, Snapshot(), instante("11:00:00"))
     assert r.estado is EstadoMeta.CANCELADA and r.eventos == ()  # cancelamento é ato humano

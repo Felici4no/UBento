@@ -12,7 +12,7 @@ from fractions import Fraction
 from typing import Mapping, Sequence
 
 from ..conciliacao.eventos import EfeitoExecucao
-from ..conciliacao.modelos import CustoPorAtivo, RelatorioConciliacao, ResultadoExecucao, ResultadoExterno, StatusConciliacao
+from ..conciliacao.modelos import CustoPorAtivo, FonteAutorizada, Motivo, RelatorioConciliacao, ResultadoExecucao, ResultadoExterno, StatusConciliacao
 from ..esquema import Ativacao, LadoExecucao, Meta, OrigemDado
 from ..tipos import Tri
 from .modelos import (
@@ -32,8 +32,19 @@ def _fr(valor: Decimal) -> Fraction:
 # -- escopo dos registros externos sem dono ---------------------------------------------------------------------------------------------
 
 
+# Campos do contrato que nada avalia ainda. O limite de exposição é obrigatório quando menor que 1 (1 = sem limite): configurado e não
+# implementado, ele impede a meta de se declarar cumprida em vez de ser ignorado em silêncio. Os demais são só informativos.
+CAMPOS_NAO_AVALIADOS = (
+    "recursos.exposicao_maxima", "recursos.saldo_reservado", "custos.custo_fixo", "custos.taxa_proporcional", "custos.tratamento_taxa",
+)
+
+
+def limites_nao_avaliados(meta: Meta) -> tuple[str, ...]:
+    return ("recursos.exposicao_maxima",) if meta.recursos.exposicao_maxima < 1 else ()
+
+
 def avaliar_escopo_orfao(orfao: ResultadoExterno, meta: Meta, ativacao: Ativacao, registros_da_meta: set[tuple[str, str]],
-                         origens: frozenset[OrigemDado]) -> OrfaoAvaliado:
+                         origens: frozenset[OrigemDado], autorizadas: Sequence[FonteAutorizada] = ()) -> OrfaoAvaliado:
     """Um registro externo sem execução interna só bloqueia a meta que ele PODE afetar.
 
     Critérios, nesta ordem (o primeiro que excluir encerra a análise; documentados em docs/AVALIACAO_META.md §3):
@@ -63,6 +74,9 @@ def avaliar_escopo_orfao(orfao: ResultadoExterno, meta: Meta, ativacao: Ativacao
     if conta_meta is not None and conta_orfao is not None and conta_meta != conta_orfao:
         return veredito(False, E.CONTA_DIFERENTE)
     indeterminada = (E.CONTA_INDETERMINADA,) if (conta_meta is None or conta_orfao is None) else ()
+    definidas = {a.fonte_id for a in autorizadas if conta_meta is not None and a.conta_id == conta_meta and a.mercado_id == meta.mercado.mercado_id}
+    if definidas and orfao.fonte_id not in definidas:  # fonte alternativa, só para comparação: não bloqueia a meta
+        return veredito(False, E.FONTE_NAO_AUTORIZADA)
 
     if orfao.lado is LadoExecucao.ESTORNO_COMPRA:
         if orfao.estorna_id_externo is not None and (orfao.fonte_id, orfao.estorna_id_externo) in registros_da_meta:
@@ -124,7 +138,7 @@ def analisar_progresso(
 
     # -- pendências (completude) e escopo dos órfãos
     registros_da_meta = {(x.fonte_id, x.id_externo) for r in resultados.values() for x in r.externos}
-    orfaos = [avaliar_escopo_orfao(o, meta, ativacao, registros_da_meta, origens) for o in relatorio.orfaos]
+    orfaos = [avaliar_escopo_orfao(o, meta, ativacao, registros_da_meta, origens, relatorio.fontes_autorizadas) for o in relatorio.orfaos]
     por_chave: dict[tuple[str, str], ResultadoExterno] = {(o.fonte_id, o.id_externo): o for o in relatorio.orfaos}
     pendencias: list[Pendencia] = []
     pendente_qtd = Fraction(0)
@@ -150,8 +164,8 @@ def analisar_progresso(
                                         motivo_avaliacao=M.PROVA_ANTERIOR_CONTRADITA if contradita else M.COMPRA_NAO_CONCILIADA))
         else:  # pendente / não verificável, sem prova anterior
             pendencias.append(Pendencia(referencia=id_, origem="execucao", status=status, motivos=motivos, motivo_avaliacao=M.COMPRA_NAO_CONCILIADA))
-            if r.executada_em <= prazo and r.executada_em >= ativacao.ativada_em:
-                pendente_qtd += _fr(r.declarado)
+            if r.executada_em <= prazo and r.executada_em >= ativacao.ativada_em and Motivo.FONTE_NAO_AUTORIZADA not in r.motivos:
+                pendente_qtd += _fr(r.declarado)  # fonte alternativa nunca é "evidência que ainda pode chegar"
 
     qtd_orfaos = Fraction(0)
     for ov in orfaos:
@@ -168,12 +182,15 @@ def analisar_progresso(
             qtd_orfaos += _fr(o.quantidade)
 
     # -- orçamento: limite obrigatório com pior caso explícito
-    orcamento = _orcamento(meta, resultados, efeitos, [por_chave[(o.fonte_id, o.id_externo)] for o in orfaos if o.relevante])
+    slice_ = next((p for p in relatorio.progresso if p.meta_id == meta.id), None)
+    custos: tuple[CustoPorAtivo, ...] = slice_.custos if slice_ else ()
+    orcamento = _orcamento(meta, resultados, efeitos, [por_chave[(o.fonte_id, o.id_externo)] for o in orfaos if o.relevante], custos)
 
     # -- elegibilidade: três verificações independentes, combinadas com `todos`
     quantidade_ok = Tri.VERDADEIRO if comprovada >= _fr(alvo) else Tri.FALSO
     reduz = any(p.pode_reduzir_progresso for p in pendencias)
-    verificacoes = [quantidade_ok, Tri.INDETERMINADO if reduz else Tri.VERDADEIRO, orcamento.resultado]
+    limites = limites_nao_avaliados(meta)
+    verificacoes = [quantidade_ok, Tri.INDETERMINADO if reduz else Tri.VERDADEIRO, orcamento.resultado, Tri.INDETERMINADO if limites else Tri.VERDADEIRO]
     motivos_el: list[M] = []
     if quantidade_ok is Tri.FALSO:
         motivos_el.append(M.QUANTIDADE_INSUFICIENTE)
@@ -183,6 +200,8 @@ def analisar_progresso(
         motivos_el.append(M.ORCAMENTO_EXCEDIDO)
     elif orcamento.resultado is Tri.INDETERMINADO:
         motivos_el.append(M.ORCAMENTO_INDETERMINADO)
+    if limites:
+        motivos_el.append(M.LIMITE_NAO_AVALIADO)
     elegibilidade = Elegibilidade(resultado=todos(verificacoes), motivos=tuple(motivos_el))
 
     # -- ainda dá para comprovar? (decide se a carência faz sentido)
@@ -191,19 +210,21 @@ def analisar_progresso(
     carencia = meta.politicas.carencia_dados_segundos
     em_carencia = prazo < agora and (agora - prazo).total_seconds() <= carencia
 
-    slice_ = next((p for p in relatorio.progresso if p.meta_id == meta.id), None)
-    custos: tuple[CustoPorAtivo, ...] = slice_.custos if slice_ else ()
     return ProgressoAvaliado(
         quantidade_alvo=alvo, quantidade_comprovada=_dec(comprovada), quantidade_fora_da_janela=_dec(fora), quantidade_preservada=_dec(preservada),
         quantidade_pendente=_dec(pendente_qtd), instante_atingimento=instante_atingimento,
         completude=Completude(completa=not pendencias, pendencias=tuple(pendencias)), custos=custos, orcamento=orcamento,
         elegibilidade=elegibilidade, orfaos=tuple(orfaos), aguardando_evidencia=aguardando, em_carencia=em_carencia,
+        limites_nao_avaliados=limites, campos_nao_avaliados=CAMPOS_NAO_AVALIADOS,
     )
 
 
 def _orcamento(meta: Meta, resultados: Mapping[str, ResultadoExecucao], efeitos: Mapping[str, EfeitoExecucao],
-               orfaos_relevantes: Sequence[ResultadoExterno]) -> LimiteOrcamento:
-    """Gasto mínimo (só o comprovado) e máximo (pior caso). O limite só é verdadeiro se o máximo cabe no orçamento."""
+               orfaos_relevantes: Sequence[ResultadoExterno], custos: Sequence[CustoPorAtivo] = ()) -> LimiteOrcamento:
+    """O orçamento cobre o CUSTO TOTAL: desembolso na moeda de cotação (bruta × preço), taxas na moeda de cotação e o custo fixo como pior caso.
+    Gasto mínimo = só o comprovado; máximo = pior caso. O limite só é verdadeiro se o máximo cabe E nada do custo ficou sem como medir:
+    taxa em terceiro ativo não é convertida (não há cotação confiável), então, havendo uma, o orçamento nunca é declarado satisfeito
+    (indeterminado), salvo se o gasto já conhecido bastar para demonstrar o estouro (falso)."""
     moeda = meta.recursos.moeda_orcamento_id
     orcamento = meta.recursos.orcamento
     minimo, maximo = Fraction(0), Fraction(0)
@@ -230,6 +251,12 @@ def _orcamento(meta: Meta, resultados: Mapping[str, ResultadoExecucao], efeitos:
         if declarado_nao != 0:
             motivos.append(M.CUSTOS_SEM_EVIDENCIA)
 
+    ativo = meta.objetivo.ativo_id
+    terceiros = any(c.ativo_id not in (moeda, ativo) and (c.verificado + c.nao_verificado) > 0 for c in custos)
+    terceiros = terceiros or any(t.ativo_id not in (moeda, ativo) for o in orfaos_relevantes if o.lado is LadoExecucao.COMPRA for t in o.taxas)
+    if terceiros:
+        motivos.append(M.TAXA_EM_TERCEIRO_ATIVO_SEM_CONVERSAO)
+
     for o in orfaos_relevantes:
         if o.lado is not LadoExecucao.COMPRA:
             continue
@@ -242,7 +269,7 @@ def _orcamento(meta: Meta, resultados: Mapping[str, ResultadoExecucao], efeitos:
 
     if minimo > _fr(orcamento):
         resultado, motivos_finais = Tri.FALSO, [M.ORCAMENTO_EXCEDIDO]
-    elif maximo <= _fr(orcamento) and not {M.MOEDA_INCOMPATIVEL, M.MOEDA_DO_GASTO_DESCONHECIDA} & set(motivos):
+    elif maximo <= _fr(orcamento) and not {M.MOEDA_INCOMPATIVEL, M.MOEDA_DO_GASTO_DESCONHECIDA, M.TAXA_EM_TERCEIRO_ATIVO_SEM_CONVERSAO} & set(motivos):
         resultado, motivos_finais = Tri.VERDADEIRO, []
     else:
         resultado = Tri.INDETERMINADO

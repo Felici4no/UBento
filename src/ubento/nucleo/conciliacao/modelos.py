@@ -87,6 +87,16 @@ class Motivo(StrEnum):
     # informativos (não bloqueiam)
     CORRIGIDO_EXTERNAMENTE = "corrigido_externamente"
     DUPLICATA_IDENTICA = "duplicata_identica"
+    # contexto da meta (ver docs/CONCILIACAO.md §11)
+    ATIVO_DA_META_DIFERENTE = "ativo_da_meta_diferente"
+    MOEDA_DA_META_DIFERENTE = "moeda_da_meta_diferente"
+    MERCADO_DA_META_DIFERENTE = "mercado_da_meta_diferente"
+    CONTA_DA_META_DIFERENTE = "conta_da_meta_diferente"
+    ORIGEM_DIFERENTE = "origem_diferente"
+    CONTEXTO_INDETERMINADO = "contexto_indeterminado"
+    FONTE_NAO_AUTORIZADA = "fonte_nao_autorizada"
+    FONTE_AUTORIZADA_NAO_DEFINIDA = "fonte_autorizada_nao_definida"
+    REGISTRO_EXTERNO_REIMPORTADO = "registro_externo_reimportado"  # a mesma operação chegou mais de uma vez (vale a primeira chegada)
     # externos e saldos
     SEM_REGISTRO_INTERNO = "sem_registro_interno"
     DIFERENCA_NAO_EXPLICADA = "diferenca_nao_explicada"
@@ -96,7 +106,7 @@ class Motivo(StrEnum):
     MOVIMENTO_DE_EXECUCAO_DIVERGENTE = "movimento_de_execucao_divergente"
 
 
-INFORMATIVOS = frozenset({Motivo.CORRIGIDO_EXTERNAMENTE, Motivo.DUPLICATA_IDENTICA})
+INFORMATIVOS = frozenset({Motivo.CORRIGIDO_EXTERNAMENTE, Motivo.DUPLICATA_IDENTICA, Motivo.REGISTRO_EXTERNO_REIMPORTADO})
 
 
 # -- entradas ----------------------------------------------------------------------------------------------
@@ -241,6 +251,14 @@ class CoberturaExecucoes(Modelo):
         return self
 
 
+class FonteAutorizada(Modelo):
+    """A fonte que PODE comprovar execuções de uma conta num mercado. Outras fontes podem ser importadas para comparação, mas não comprovam."""
+
+    conta_id: Identificador
+    mercado_id: Identificador
+    fonte_id: Identificador
+
+
 class PoliticaConciliacao(Modelo):
     """Parâmetros explícitos; não existe limite universal."""
 
@@ -252,6 +270,8 @@ class PoliticaConciliacao(Modelo):
     tolerancia_quantidade_padrao: Quantidade = Decimal(0)
     tolerancia_saldo: Quantidade = Decimal(0)
     orfaos_bloqueiam_confirmacao: bool = True
+    # Quem comprova, por (conta, mercado). Obrigatória quando a conciliação conhece as metas: sem entrada para o contexto da meta, nada comprova.
+    fontes_autorizadas: tuple[FonteAutorizada, ...] = ()
 
     def tolerancia_de(self, ativo_id: str) -> Decimal:
         return self.tolerancias_quantidade.get(ativo_id, self.tolerancia_quantidade_padrao)
@@ -372,4 +392,6 @@ class RelatorioConciliacao(Modelo):
     saldos: tuple[ResultadoSaldo, ...]
     progresso: tuple[ProgressoMeta, ...]
     confirmacao: Confirmacao
+    metas_validadas: tuple[Identificador, ...] = ()  # metas cujo contexto (ativo, moeda, mercado, conta, fonte) foi conferido neste relatório
+    fontes_autorizadas: tuple[FonteAutorizada, ...] = ()
     hash_saida: HashHex | None = None

@@ -1,6 +1,7 @@
 # Cenário FICTÍCIO gerado por scripts/gerar_cenarios_meta.py (não edite à mão; mude o script).
 ativada_em: '2026-10-20T08:00:00Z'
-descricao: 'A taxa de 0,002 BNB é custo verificado em BNB: não tira nenhuma unidade de TOKX, então 10 comprados são 10 líquidos e a meta fecha.'
+descricao: 'A taxa de 0,002 BNB é custo verificado em BNB: não tira nenhuma unidade de TOKX (10 comprados são 10 líquidos comprovados). Mas o orçamento cobre o CUSTO
+  TOTAL e não há conversão confiável de BNB para USD: o orçamento fica indeterminado e a meta NÃO se declara cumprida.'
 execucoes:
 - ativo_id: tokx
   confirmada_em: '2026-10-20T10:01:00Z'
@@ -54,7 +55,7 @@ meta:
     - metrica_id: retorno_7d
       validade_maxima_segundos: 86400
   recursos:
-    exposicao_maxima: '0.5'
+    exposicao_maxima: '1'
     moeda_orcamento_id: usd
     orcamento: '1000'
     saldo_reservado: '1000'
@@ -103,13 +104,14 @@ meta:
 momentos:
 - agora: '2026-10-20T10:30:00Z'
   esperado:
-    elegibilidade: verdadeiro
-    estado: atingida
+    elegibilidade: indeterminado
+    estado: ativa
     eventos:
     - ativada
     - execucao_registrada
-    - atingida
-    orcamento: verdadeiro
+    motivos_elegibilidade:
+    - orcamento_indeterminado
+    orcamento: indeterminado
     quantidade_comprovada: '10'
 observacoes:
 - ativo_id: tokx
@@ -136,6 +138,10 @@ observacoes:
   valor: '0.01'
 origem: simulado
 politica_conciliacao:
+  fontes_autorizadas:
+  - conta_id: conta-a
+    fonte_id: corretora-sim
+    mercado_id: bolsa-a
   janela_atraso_segundos: 3600
   tolerancia_horario_segundos: 60
 registros_externos:

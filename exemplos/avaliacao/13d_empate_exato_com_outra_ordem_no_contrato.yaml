@@ -56,7 +56,7 @@ meta:
     - metrica_id: retorno_7d
       validade_maxima_segundos: 86400
   recursos:
-    exposicao_maxima: '0.5'
+    exposicao_maxima: '1'
     moeda_orcamento_id: usd
     orcamento: '1000'
     saldo_reservado: '1000'
@@ -147,6 +147,10 @@ observacoes:
   valor: '-0.5'
 origem: simulado
 politica_conciliacao:
+  fontes_autorizadas:
+  - conta_id: conta-a
+    fonte_id: corretora-sim
+    mercado_id: bolsa-a
   janela_atraso_segundos: 3600
   tolerancia_horario_segundos: 60
 registros_externos:

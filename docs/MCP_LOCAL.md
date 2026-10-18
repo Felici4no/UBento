@@ -26,7 +26,7 @@ Toda resposta de meta traz o mesmo envelope:
 | Campo | Significa |
 | --- | --- |
 | `estado_persistido` | o estado da **última avaliação gravada**. Não é recalculado ao consultar |
-| `ultima_avaliacao` | **quando** ela foi feita (`avaliada_em`), versão do motor e se estava bloqueada por dados |
+| `ultima_avaliacao` | **quando** ela foi feita (`avaliada_em`), versão do motor, se estava bloqueada por dados e **de onde veio o instante** (`instante_vem_de`: `relogio_real` ou `cenario`) |
 | `leitura` | `tempo_real: false` e um **aviso em texto** que diz a data da última avaliação e que os dados não são atualizados em tempo real (e, se for o caso, que há entradas mais novas que ela) |
 | `cobertura_da_evidencia` | o que a evidência importada garante: registros externos, **coberturas de consulta** declaradas pela fonte (sem elas a ausência de um registro **não** prova que ele não existe) e o que chegou **depois** da última avaliação (`posterior_a_ultima_avaliacao`, `desatualizada`) |
 

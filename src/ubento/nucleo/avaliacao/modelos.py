@@ -29,7 +29,9 @@ class MotivoAvaliacao(StrEnum):
     PENDENCIA_PODE_REDUZIR_PROGRESSO = "pendencia_pode_reduzir_progresso"
     ORCAMENTO_EXCEDIDO = "orcamento_excedido"
     ORCAMENTO_INDETERMINADO = "orcamento_indeterminado"
-    # orçamento
+    # orçamento (custo total) e limites
+    TAXA_EM_TERCEIRO_ATIVO_SEM_CONVERSAO = "taxa_em_terceiro_ativo_sem_conversao"
+    LIMITE_NAO_AVALIADO = "limite_nao_avaliado"
     CUSTOS_SEM_EVIDENCIA = "custos_sem_evidencia"
     MOEDA_INCOMPATIVEL = "moeda_incompativel"
     MOEDA_DO_GASTO_DESCONHECIDA = "moeda_do_gasto_desconhecida"
@@ -60,6 +62,7 @@ class MotivoEscopo(StrEnum):
     MOEDA_COTACAO_DIFERENTE = "moeda_cotacao_diferente"
     CONTA_DIFERENTE = "conta_diferente"
     ORIGEM_DIFERENTE = "origem_diferente"
+    FONTE_NAO_AUTORIZADA = "fonte_nao_autorizada"  # fonte alternativa (comparação): não comprova e não bloqueia
     FORA_DO_PERIODO = "fora_do_periodo"
     ESTORNO_DE_OUTRA_COMPRA = "estorno_de_outra_compra"
     JA_ENCERRADO = "ja_encerrado"
@@ -118,6 +121,9 @@ class ProgressoAvaliado(Modelo):
     orfaos: tuple[OrfaoAvaliado, ...] = ()
     aguardando_evidencia: bool = False
     em_carencia: bool = False
+    # Campos do contrato que o motor ainda NÃO avalia. Os que são limites obrigatórios impedem a meta de se declarar cumprida (indeterminado).
+    limites_nao_avaliados: tuple[str, ...] = ()
+    campos_nao_avaliados: tuple[str, ...] = ()
 
 
 class ResultadoAvaliacao(Modelo):

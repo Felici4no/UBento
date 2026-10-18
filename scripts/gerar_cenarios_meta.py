@@ -37,7 +37,7 @@ def cmp(id_, op, metrica, valor, unidade, janela=None):
     return {"id": id_, "op": op, "esquerda": esquerda, "direita": {"tipo": "valor", "valor": valor, "unidade": unidade}}
 
 
-def meta(alvo="10", prazo="16:00:00", carencia=7200, orcamento="1000", conta="conta-a", ordem=None):
+def meta(alvo="10", prazo="16:00:00", carencia=7200, orcamento="1000", conta="conta-a", ordem=None, exposicao="1"):
     politicas = {
         "carencia_dados_segundos": carencia,
         "validades": [{"metrica_id": "preco_executavel", "validade_maxima_segundos": 86400}, {"metrica_id": "retorno_7d", "validade_maxima_segundos": 86400}],
@@ -49,7 +49,7 @@ def meta(alvo="10", prazo="16:00:00", carencia=7200, orcamento="1000", conta="co
         "objetivo": {"tipo": "acumular_quantidade", "ativo_id": "tokx", "moeda_cotacao_id": "usd", "quantidade_alvo": alvo, "prazo": t(prazo)},
         "mercado": {"mercado_id": "bolsa-a", "conta_id": conta, "incremento_preco": "0.0001", "incremento_quantidade": "0.01"},
         "custos": {"custo_fixo": "0", "taxa_proporcional": "0.005", "tratamento_taxa": "cobrada_na_cotacao"},
-        "recursos": {"orcamento": orcamento, "moeda_orcamento_id": "usd", "saldo_reservado": orcamento, "exposicao_maxima": "0.5"},
+        "recursos": {"orcamento": orcamento, "moeda_orcamento_id": "usd", "saldo_reservado": orcamento, "exposicao_maxima": exposicao},
         "regras": {
             "bloqueios": [cmp("bq-preco", "gt", "preco_executavel", "0", "USD")],
             "entrada": [cmp("en-preco", "lte", "preco_executavel", "9.9", "USD")],
@@ -69,7 +69,7 @@ def obs(id_, metrica, valor, unidade, hora):
 OBS_BASE = [obs("o-preco-0", "preco_executavel", "12", "USD", "08:30:00"), obs("o-ret-0", "retorno_7d", "0.01", "razao", "08:30:00")]
 
 
-def ex(id_, bruta, taxa="0", h="10:00:00", preco="9.5", refs=None, lado="compra", estorna=None, minutos_conf=1, **extra):
+def ex(id_, bruta, taxa="0", h="10:00:00", preco="9.5", refs=None, lado="compra", estorna=None, minutos_conf=1, fonte=FONTE, **extra):
     hh, mm, ss = (int(x) for x in h.split(":"))
     total = hh * 3600 + mm * 60 + ss + minutos_conf * 60
     conf = f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
@@ -77,7 +77,7 @@ def ex(id_, bruta, taxa="0", h="10:00:00", preco="9.5", refs=None, lado="compra"
         "id": id_, "meta_id": META, "ativo_id": "tokx", "lado": lado, "quantidade_bruta": s(bruta), "taxa_no_ativo": s(taxa),
         "quantidade_liquida": s(Decimal(str(bruta)) - Decimal(str(taxa))), "preco_executado": s(preco), "moeda_cotacao_id": "usd",
         "executada_em": t(h), "confirmada_em": t(conf), "fonte_id": "registro-manual", "origem": "simulado",
-        "referencias_externas": [{"fonte_id": FONTE, "id_externo": r} for r in (refs or [f"fill-{id_.split('-')[-1]}"])],
+        "referencias_externas": [{"fonte_id": fonte, "id_externo": r} for r in (refs or [f"fill-{id_.split('-')[-1]}"])],
     }
     if estorna:
         registro["estorna_execucao_id"] = estorna
@@ -86,12 +86,12 @@ def ex(id_, bruta, taxa="0", h="10:00:00", preco="9.5", refs=None, lado="compra"
 
 
 def ext(id_, qtd, taxas=(), h="10:00:00", recebido=None, preco="9.5", lado="compra", estorna=None, conta="conta-a", mercado="bolsa-a", ativo="tokx",
-        origem="simulado", status="confirmado", versao=1):
+        origem="simulado", status="confirmado", versao=1, fonte=FONTE):
     hh, mm, ss = (int(x) for x in h.split(":"))
     total = hh * 3600 + mm * 60 + ss + 30
     padrao = f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
     registro = {
-        "fonte_id": FONTE, "id_externo": id_, "versao": versao, "mercado_id": mercado, "conta_id": conta, "ativo_id": ativo, "moeda_cotacao_id": "usd",
+        "fonte_id": fonte, "id_externo": id_, "versao": versao, "mercado_id": mercado, "conta_id": conta, "ativo_id": ativo, "moeda_cotacao_id": "usd",
         "lado": lado, "quantidade": s(qtd), "preco": s(preco), "taxas": [{"ativo_id": a, "valor": s(v)} for a, v in taxas], "status": status,
         "executado_em": t(h), "recebido_em": t(recebido or padrao), "origem": origem,
     }
@@ -110,11 +110,16 @@ def m(hora, ocultar=None, **esperado):
 POLITICA = {"janela_atraso_segundos": 3600, "tolerancia_horario_segundos": 60}
 
 
+def politica(conta="conta-a"):
+    """A fonte que comprova é declarada por (conta, mercado). Sem conta no contrato não há fonte a autorizar."""
+    return {**POLITICA, "fontes_autorizadas": [{"conta_id": conta, "mercado_id": "bolsa-a", "fonte_id": FONTE}] if conta else []}
+
+
 def cenario(descricao, execucoes, externos, momentos, alvo="10", prazo="16:00:00", carencia=7200, orcamento="1000", observacoes=None, conta="conta-a",
-            ordem=None, **extra):
+            ordem=None, exposicao="1", **extra):
     return {
-        "schema_versao": 1, "origem": "simulado", "descricao": descricao, "meta": meta(alvo, prazo, carencia, orcamento, conta, ordem),
-        "ativada_em": t("08:00:00"), "responsavel": "Pessoa de exemplo", "politica_conciliacao": dict(POLITICA), "execucoes": execucoes,
+        "schema_versao": 1, "origem": "simulado", "descricao": descricao, "meta": meta(alvo, prazo, carencia, orcamento, conta, ordem, exposicao),
+        "ativada_em": t("08:00:00"), "responsavel": "Pessoa de exemplo", "politica_conciliacao": politica(conta), "execucoes": execucoes,
         "registros_externos": externos, "observacoes": OBS_BASE if observacoes is None else observacoes, "momentos": momentos, **extra,
     }
 
@@ -149,10 +154,11 @@ C["02_taxa_no_ativo_reduz_a_quantidade"] = cenario(
 
 # 03 --------------------------------------------------------------------------------------------------------------------------------------
 C["03_taxa_em_terceiro_ativo_nao_reduz"] = cenario(
-    "A taxa de 0,002 BNB é custo verificado em BNB: não tira nenhuma unidade de TOKX, então 10 comprados são 10 líquidos e a meta fecha.",
+    "A taxa de 0,002 BNB é custo verificado em BNB: não tira nenhuma unidade de TOKX (10 comprados são 10 líquidos comprovados). Mas o orçamento cobre o CUSTO TOTAL e não há conversão confiável de BNB para USD: o orçamento fica indeterminado e a meta NÃO se declara cumprida.",
     [ex("ex-1", "10", "0", "10:00:00", taxas_outros_ativos=[{"ativo_id": "bnb", "valor": "0.002"}])],
     [ext("fill-1", "10", [("bnb", "0.002")], "10:00:00")],
-    [m("10:30:00", estado="atingida", eventos=["ativada", "execucao_registrada", "atingida"], quantidade_comprovada="10", elegibilidade="verdadeiro", orcamento="verdadeiro")],
+    [m("10:30:00", estado="ativa", eventos=["ativada", "execucao_registrada"], quantidade_comprovada="10", elegibilidade="indeterminado", orcamento="indeterminado",
+       motivos_elegibilidade=["orcamento_indeterminado"])],
 )
 
 # 04 --------------------------------------------------------------------------------------------------------------------------------------

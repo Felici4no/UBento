@@ -63,7 +63,8 @@ class ConsultaMetas:
         if ultima is None:
             return None
         a = ultima[0]
-        return {"id": a.id, "avaliada_em": jsonavel(a.avaliada_em), "versao_motor": a.versao_motor, "bloqueada_por_dados": a.bloqueada_por_dados}
+        return {"id": a.id, "avaliada_em": jsonavel(a.avaliada_em), "versao_motor": a.versao_motor, "bloqueada_por_dados": a.bloqueada_por_dados,
+                "instante_vem_de": "cenario" if self.repo.meta_e_cenario(meta_id) else "relogio_real"}
 
     def _cobertura(self, meta_id: str) -> dict:
         """O que a evidência cobre e o que chegou depois da última avaliação. É um INDICADOR por instantes: nada é reconciliado aqui."""

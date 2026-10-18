@@ -51,6 +51,8 @@ def avaliar_meta(
         raise ErroDeAvaliacao("o contrato apresentado não é o que foi ativado (hash diferente): metas ativas são imutáveis")
     if agora < ativacao.ativada_em:
         raise ErroDeAvaliacao("avaliação anterior à ativação")
+    if meta.id not in relatorio.metas_validadas:
+        raise ErroDeAvaliacao("o relatório de conciliação não validou o contexto desta meta (ativo, moeda, mercado, conta e fonte autorizada): concilie informando `metas`")
 
     historia = validar_historico(meta.id, eventos)
     conhecidos = {e.id for e in historia}

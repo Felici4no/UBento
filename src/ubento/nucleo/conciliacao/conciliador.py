@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from typing import Iterable, Sequence
 
 from ..canonico import hash_canonico, json_canonico
-from ..esquema import Execucao, LadoExecucao
+from ..esquema import Execucao, LadoExecucao, Meta
 from ..tipos import formatar_instante, normalizar_decimal
 from .modelos import (
     INFORMATIVOS, Cobertura, CoberturaExecucoes, Confirmacao, CustoPorAtivo, Diferenca, GastoPorAtivo, Motivo, Movimentacao, PoliticaConciliacao,
@@ -69,6 +69,8 @@ class _Contexto:
     conflitantes: set[Chave]
     corrigidas: set[Chave]
     problemas_de_alocacao: dict[Chave, Motivo] = field(default_factory=dict)
+    reimportadas: set[Chave] = field(default_factory=set)
+    metas: dict[str, Meta] = field(default_factory=dict)
     reivindicadas: set[Chave] = field(default_factory=set)
     coberturas: Sequence[CoberturaExecucoes] = ()
 
@@ -93,21 +95,39 @@ def _unicas(execucoes: Iterable[Execucao]) -> tuple[dict[str, Execucao], set[str
     return unicas, duplicadas, conflitantes
 
 
-def _historia_externa(externos: Iterable[RegistroExterno]) -> tuple[dict[Chave, RegistroExterno], set[Chave], set[Chave]]:
+_SEM_HORA = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _conteudo(r: RegistroExterno) -> str:
+    """O CONTEÚDO da operação, sem o metadado de recebimento: `recebido_em` diz quando chegou, não o que aconteceu, e a ordem das
+    taxas não é informação. Identidade = (fonte, id); conteúdo = o resto menos o recebimento; recebimento = `recebido_em`."""
+    return json_canonico(r.model_copy(update={"recebido_em": _SEM_HORA, "taxas": tuple(sorted(r.taxas, key=lambda t: t.ativo_id))}))
+
+
+def _historia_externa(externos: Iterable[RegistroExterno]) -> tuple[dict[Chave, RegistroExterno], set[Chave], set[Chave], set[Chave]]:
+    """(registro vigente por chave, chaves conflitantes, chaves corrigidas, chaves reimportadas).
+
+    Na versão mais alta, cópias com o mesmo conteúdo são a MESMA operação reimportada: vale a primeira chegada (menor `recebido_em`) e a
+    reimportação só é anotada. Conteúdos diferentes na mesma versão são conflito de verdade."""
     grupos: dict[Chave, list[RegistroExterno]] = defaultdict(list)
     for r in externos:
         grupos[r.chave].append(r)
-    atual, conflitantes, corrigidas = {}, set(), set()
+    atual, conflitantes, corrigidas, reimportadas = {}, set(), set(), set()
     for chave, regs in grupos.items():
         maior = max(r.versao for r in regs)
-        topo = {json_canonico(r): r for r in regs if r.versao == maior}
-        ordenados = [topo[k] for k in sorted(topo)]
-        atual[chave] = ordenados[0]
-        if len(topo) > 1:
+        por_conteudo: dict[str, list[RegistroExterno]] = defaultdict(list)
+        for r in regs:
+            if r.versao == maior:
+                por_conteudo[_conteudo(r)].append(r)
+        primeiras = {c: min(copias, key=lambda r: (r.recebido_em, json_canonico(r))) for c, copias in por_conteudo.items()}
+        atual[chave] = primeiras[sorted(primeiras)[0]]
+        if len(por_conteudo) > 1:
             conflitantes.add(chave)
+        if any(len(copias) > 1 for copias in por_conteudo.values()):
+            reimportadas.add(chave)
         if any(r.versao < maior for r in regs):
             corrigidas.add(chave)
-    return atual, conflitantes, corrigidas
+    return atual, conflitantes, corrigidas, reimportadas
 
 
 def _referencias(execucao: Execucao, vinculos: Sequence[VinculoManual]) -> list[_Ref]:
@@ -163,6 +183,8 @@ def _comparar(execucao: Execucao, pares: list[tuple[_Ref, RegistroExterno]], pol
             registrar(Motivo.LADO_DIFERENTE, "lado", execucao.lado.value, reg.lado.value)
         if execucao.moeda_cotacao_id is not None and reg.moeda_cotacao_id != execucao.moeda_cotacao_id:
             registrar(Motivo.MOEDA_COTACAO_DIFERENTE, "moeda_cotacao_id", execucao.moeda_cotacao_id, reg.moeda_cotacao_id)
+        if reg.origem is not execucao.origem:  # evidência simulada não comprova execução real (nem o inverso)
+            registrar(Motivo.ORIGEM_DIFERENTE, "origem", execucao.origem.value, reg.origem.value)
         desvio = abs((reg.executado_em - execucao.executada_em).total_seconds())
         if desvio > politica.tolerancia_horario_segundos:
             registrar(Motivo.HORARIO_FORA_DA_TOLERANCIA, "executada_em", formatar_instante(execucao.executada_em), formatar_instante(reg.executado_em))
@@ -249,6 +271,47 @@ def _candidatos(execucao: Execucao, atual: dict[Chave, RegistroExterno], reivind
     return tuple(RefResolvida(fonte_id=c[0], id_externo=c[1], versao=v) for _, c, v in sorted(achados)[:MAX_CANDIDATOS])
 
 
+# -- contexto da meta ------------------------------------------------------------------------------------------------------
+
+
+def _contexto_da_execucao(e: Execucao, meta: Meta) -> list[Motivo]:
+    """Incompatibilidades EXPLÍCITAS da execução com o objetivo da meta (independem de evidência)."""
+    motivos = []
+    if e.ativo_id != meta.objetivo.ativo_id:
+        motivos.append(Motivo.ATIVO_DA_META_DIFERENTE)
+    if e.moeda_cotacao_id is not None and e.moeda_cotacao_id != meta.objetivo.moeda_cotacao_id:
+        motivos.append(Motivo.MOEDA_DA_META_DIFERENTE)
+    return motivos
+
+
+def _contexto_dos_registros(registros: Iterable[RegistroExterno], meta: Meta) -> tuple[list[Motivo], bool]:
+    """(incompatibilidades explícitas, conta indeterminada) dos registros que sustentam a execução, frente à meta.
+    Explícita = dado presente dos dois lados e diferente. Indeterminada = a conta falta no registro ou no contrato."""
+    explicitas: list[Motivo] = []
+    indeterminada = False
+    for reg in registros:
+        if reg.ativo_id != meta.objetivo.ativo_id:
+            explicitas.append(Motivo.ATIVO_DA_META_DIFERENTE)
+        if reg.moeda_cotacao_id != meta.objetivo.moeda_cotacao_id:
+            explicitas.append(Motivo.MOEDA_DA_META_DIFERENTE)
+        if reg.mercado_id != meta.mercado.mercado_id:
+            explicitas.append(Motivo.MERCADO_DA_META_DIFERENTE)
+        if reg.conta_id is None or meta.mercado.conta_id is None:
+            indeterminada = True
+        elif reg.conta_id != meta.mercado.conta_id:
+            explicitas.append(Motivo.CONTA_DA_META_DIFERENTE)
+    return list(dict.fromkeys(explicitas)), indeterminada
+
+
+def fonte_autorizada(meta: Meta, fonte_id: str, politica: PoliticaConciliacao) -> bool | None:
+    """True/False se a política diz se `fonte_id` comprova para o (conta, mercado) da meta; None se não há fonte definida para o contexto."""
+    conta = meta.mercado.conta_id
+    definidas = [a for a in politica.fontes_autorizadas if conta is not None and a.conta_id == conta and a.mercado_id == meta.mercado.mercado_id]
+    if not definidas:
+        return None
+    return any(a.fonte_id == fonte_id for a in definidas)
+
+
 # -- avaliação de uma execução --------------------------------------------------------------------------------------------
 
 
@@ -276,6 +339,7 @@ def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bo
         if duplicada:
             extras.append(Motivo.DUPLICATA_IDENTICA)
         extras += [Motivo.CORRIGIDO_EXTERNAMENTE] if any((r.fonte_id, r.id_externo) in ctx.corrigidas for r in externos) else []
+        extras += [Motivo.REGISTRO_EXTERNO_REIMPORTADO] if any((r.fonte_id, r.id_externo) in ctx.reimportadas for r in externos) else []
         comprovado_g, nao_comprovado_g = _gastos(execucao, status is StatusConciliacao.CONCILIADA)
         moeda = execucao.moeda_cotacao_id or next(
             (ctx.atual[(r.fonte_id, r.id_externo)].moeda_cotacao_id for r in externos if (r.fonte_id, r.id_externo) in ctx.atual), None)
@@ -289,6 +353,11 @@ def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bo
 
     if conflitante:
         return resultado(StatusConciliacao.REVISAO, [Motivo.ID_INTERNO_DUPLICADO_CONTEUDO_DIFERENTE], declarado_=Decimal(0))
+    meta = ctx.metas.get(execucao.meta_id)
+    if meta is not None:
+        explicitas = _contexto_da_execucao(execucao, meta)
+        if explicitas:  # ativo ou moeda incompatíveis com a meta: não comprova, com ou sem evidência
+            return resultado(StatusConciliacao.DIVERGENTE, explicitas)
     if not refs:
         cands = _candidatos(execucao, ctx.atual, ctx.reivindicadas, ctx.politica)
         return resultado(StatusConciliacao.REVISAO, [Motivo.SEM_IDENTIFICADOR_EXTERNO], candidatos=cands)
@@ -306,6 +375,19 @@ def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bo
     if revisao:
         return resultado(StatusConciliacao.REVISAO, revisao, externos=externos)
 
+    indeterminada = False
+    if meta is not None:
+        explicitas, indeterminada = _contexto_dos_registros((g for _, g in resolvidas), meta)
+        if explicitas:  # evidência de outra conta, mercado, moeda ou ativo: incompatibilidade explícita nunca comprova
+            return resultado(StatusConciliacao.DIVERGENTE, explicitas, externos=externos)
+        if meta.mercado.conta_id is None:
+            return resultado(StatusConciliacao.NAO_VERIFICAVEL, [Motivo.CONTEXTO_INDETERMINADO], externos=externos)
+        permissoes = {fonte_autorizada(meta, r.fonte_id, ctx.politica) for r in refs}
+        if None in permissoes:
+            return resultado(StatusConciliacao.NAO_VERIFICAVEL, [Motivo.FONTE_AUTORIZADA_NAO_DEFINIDA], externos=externos)
+        if False in permissoes:  # fonte alternativa: serve para comparar, não para comprovar
+            return resultado(StatusConciliacao.NAO_VERIFICAVEL, [Motivo.FONTE_NAO_AUTORIZADA], externos=externos)
+
     if faltando:
         idade = (ctx.agora - execucao.confirmada_em).total_seconds()
         if idade <= ctx.politica.janela_atraso_segundos:
@@ -321,6 +403,8 @@ def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bo
     diferencas, motivos = _comparar(execucao, resolvidas, ctx.politica)
     if motivos:
         return resultado(StatusConciliacao.DIVERGENTE, motivos, externos=externos, diferencas=diferencas)
+    if indeterminada:  # nenhuma incompatibilidade explícita, mas a conta da evidência não está dita: não dá para afirmar
+        return resultado(StatusConciliacao.NAO_VERIFICAVEL, [Motivo.CONTEXTO_INDETERMINADO], externos=externos)
     return resultado(StatusConciliacao.CONCILIADA, [], externos=externos, efeito=declarado)
 
 
@@ -437,7 +521,7 @@ def vinculos_vigentes(vinculos: Sequence[VinculoManual], revogacoes: Sequence[Re
     return saida
 
 
-def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, saldos, coberturas, coberturas_execucoes, vinculos, revogacoes=()) -> str:
+def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, saldos, coberturas, coberturas_execucoes, vinculos, revogacoes=(), metas=()) -> str:
     def lote(itens):
         return sorted(json_canonico(i) for i in itens)
 
@@ -446,6 +530,8 @@ def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, sa
         "movimentacoes": lote(movimentacoes), "saldos": lote(saldos), "coberturas": lote(coberturas),
         "coberturas_execucoes": lote(coberturas_execucoes), "vinculos": lote(vinculos),
     }
+    if metas:  # o contexto das metas também faz parte das entradas (sem metas, o hash é o de sempre)
+        entradas["metas"] = lote(metas)
     if revogacoes:  # só entra quando existe: relatórios sem revogação mantêm exatamente o mesmo hash de antes
         entradas["revogacoes"] = lote(revogacoes)
     return hash_canonico(entradas, DOMINIO_ENTRADAS)
@@ -463,11 +549,12 @@ def conciliar(
     coberturas_execucoes: Sequence[CoberturaExecucoes] = (),
     vinculos: Sequence[VinculoManual] = (),
     revogacoes: Sequence[RevogacaoVinculo] = (),
+    metas: Sequence[Meta] = (),
 ) -> RelatorioConciliacao:
     """Concilia o que era conhecido em `agora`. Mesmas entradas e mesmo `agora` → mesmo relatório (mesmo hash)."""
     hash_entradas = hash_das_entradas(agora=agora, politica=politica, execucoes=execucoes, externos=externos,
                                       movimentacoes=movimentacoes, saldos=saldos, coberturas=coberturas,
-                                      coberturas_execucoes=coberturas_execucoes, vinculos=vinculos, revogacoes=revogacoes)
+                                      coberturas_execucoes=coberturas_execucoes, vinculos=vinculos, revogacoes=revogacoes, metas=metas)
     # só existe o que já tinha chegado em `agora`
     execucoes_v = [e for e in execucoes if e.confirmada_em <= agora]
     externos_v = [r for r in externos if r.recebido_em <= agora]
@@ -475,8 +562,9 @@ def conciliar(
     coberturas_v = [c for c in coberturas_execucoes if c.consultada_em <= agora]
 
     unicas, duplicadas, conflitantes_int = _unicas(execucoes_v)
-    atual, conflitantes_ext, corrigidas = _historia_externa(externos_v)
-    ctx = _Contexto(politica=politica, agora=agora, coberturas=coberturas_v, atual=atual, conflitantes=conflitantes_ext, corrigidas=corrigidas)
+    atual, conflitantes_ext, corrigidas, reimportadas = _historia_externa(externos_v)
+    ctx = _Contexto(politica=politica, agora=agora, coberturas=coberturas_v, atual=atual, conflitantes=conflitantes_ext, corrigidas=corrigidas,
+                    reimportadas=reimportadas, metas={m.id: m for m in metas})
 
     refs_por_exec = {id_: _referencias(e, vinculos_v) for id_, e in unicas.items()}
     validos = set(unicas) - conflitantes_int
@@ -506,5 +594,6 @@ def conciliar(
     relatorio = RelatorioConciliacao(
         agora=agora, hash_entradas=hash_entradas, execucoes=lista, orfaos=orfaos, saldos=saldos_resultado, progresso=progresso,
         confirmacao=Confirmacao.CONFIRMADA if confirmada else Confirmacao.INCOMPLETA,
+        metas_validadas=tuple(sorted(ctx.metas)), fontes_autorizadas=politica.fontes_autorizadas,
     )
     return relatorio.model_copy(update={"hash_saida": hash_canonico(relatorio, DOMINIO_SAIDA)})
