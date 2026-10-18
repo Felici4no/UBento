@@ -23,6 +23,7 @@ from . import theme
 from .components import ActionButton, Card, Label, PillButton, setup
 from .controls import Chip
 from .execucao_dialog import ExecucaoDialog
+from .vinculo_dialog import VinculoDialog
 
 W = theme.W
 
@@ -224,6 +225,26 @@ class MetasPage(QWidget):
         self.refresh()
         return nova
 
+    def criar_vinculo(self, execucao_id: str) -> VinculoDialog | None:
+        if self.meta_id is None:
+            return None
+        registrada = next((r for r in self.servico.painel(self.meta_id).execucoes if r.execucao.id == execucao_id), None)
+        if registrada is None:
+            return None
+        return VinculoDialog(registrada, self.servico.registros_disponiveis(self.meta_id),
+                             lambda fonte, ident, autor, just: self._gravar_vinculo(execucao_id, fonte, ident, autor, just), self)
+
+    def _vincular(self, execucao_id: str) -> None:
+        dialogo = self.criar_vinculo(execucao_id)
+        if dialogo is not None:
+            dialogo.exec()
+
+    def _gravar_vinculo(self, execucao_id: str, fonte: str, id_externo: str, autor: str, justificativa: str) -> bool:
+        nova = self.servico.vincular_manualmente(self.meta_id, execucao_id, fonte, id_externo, autor, justificativa)
+        self.notify.emit("Vínculo registrado no histórico. A conciliação decide se comprova" if nova else "Este vínculo já existia. Nada foi duplicado", True)
+        self.refresh()
+        return nova
+
     def _importar_evidencia(self) -> None:
         caminho, _ = QFileDialog.getOpenFileName(self, "Importar evidência externa", "", "Evidência (*.yaml *.yml *.json)")
         if caminho:
@@ -354,7 +375,7 @@ class MetasPage(QWidget):
         v.addWidget(_linha("Comprovado (líquido, dentro da janela)", f"{num(p.quantidade_comprovada)} de {num(p.quantidade_alvo)} {painel.ativo_id}", theme.TEXT))
         if p.quantidade_preservada:
             v.addWidget(_linha("Vale por prova anterior, sem reverificação agora", num(p.quantidade_preservada), theme.WARNING))
-        v.addWidget(_linha("Registrado, pendente de comprovação (NÃO conta como progresso)", num(p.quantidade_pendente), theme.WARNING if p.quantidade_pendente else theme.DIM))
+        v.addWidget(_linha("Registrado, pendente de comprovação (NÃO conta como progresso)", num(painel.quantidade_registrada_pendente), theme.WARNING if painel.quantidade_registrada_pendente else theme.DIM))
         if p.quantidade_fora_da_janela:
             v.addWidget(_linha("Comprovado, mas fora da janela da meta (não conta)", num(p.quantidade_fora_da_janela)))
         if p.instante_atingimento:
@@ -413,8 +434,16 @@ class MetasPage(QWidget):
             h.setContentsMargins(0, 0, 0, 0)
             h.addWidget(Label(f"{e.id}  ·  {sinal}{num(e.quantidade_liquida)} {e.ativo_id}  ·  {e.executada_em:%d/%m %H:%M} UTC", 14, W.Normal, theme.TEXT))
             h.addStretch(1)
+            if r.sem_referencia_externa and r.situacao != COMPROVADA:
+                botao = ActionButton("Vincular…", height=30, pad=14)
+                botao.clicked.connect(lambda _=False, i=e.id: self._vincular(i))
+                h.addWidget(botao)
             h.addWidget(Chip(rotulo, cor))
             v.addWidget(linha)
+            if r.sem_referencia_externa:
+                v.addWidget(_texto("Sem referência externa: não pode ser comprovada até ser vinculada a um registro externo.", theme.WARNING))
+            elif r.vinculo is not None:
+                v.addWidget(_texto(f"Vinculada a {r.vinculo.fonte_id}/{r.vinculo.id_externo} por {r.vinculo.autor} em {r.vinculo.em:%d/%m %H:%M} UTC: {r.vinculo.justificativa}", theme.MUTED))
         return card
 
     def _historia(self, painel: PainelMeta) -> QWidget:

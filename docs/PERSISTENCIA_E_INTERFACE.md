@@ -45,6 +45,13 @@ Acesso: botão **Metas** na faixa do agente ou botão direito na aba → “Meta
 5. **Importar evidência** (`EvidenciaExterna`: registros externos + cobertura) e reavaliar: só se a conciliação casar o registro externo com a execução ela vira **comprovada** e entra no progresso. Reimportar o mesmo arquivo não duplica.
 6. As avaliações usam como instante o mais tardio entre a última avaliação e o registro/recebimento novo (nunca o relógio do sistema).
 
+### Vincular depois (execução registrada sem referência externa)
+Uma execução registrada sem fonte/id externo não pode ser comprovada e aparece com o aviso e o botão **Vincular…**. O vínculo é uma **decisão humana** (`VinculoManual` do núcleo): escolha de um registro externo já importado, **autor** e **justificativa** (mínimo 10 caracteres).
+- **Histórico:** a execução não é editada; o vínculo é acrescentado (append-only) e a meta é reavaliada num instante de referência (nunca o relógio do sistema). Eventos e razão anteriores permanecem; a comprovação entra como evento novo.
+- **Duplicidade:** repetir o mesmo vínculo não grava nada; um registro externo não pode pertencer a duas execuções da meta (nem por vínculo, nem por referência declarada no formulário); registro não importado ou execução inexistente são recusados.
+- **Quem comprova continua sendo a conciliação:** o vínculo só diz qual registro corresponde. Quantidade, ativo, taxas e horários ainda são conferidos; se não baterem, nada é comprovado.
+- **Não há desvincular:** corrigir um vínculo errado exige um novo registro/estorno (lacuna conhecida e deliberada nesta fase).
+
 ## 5. Onde fica o banco
 
 `UBENTO_DB` se definido; senão `%LOCALAPPDATA%/UBento/ubento.db` (pasta de dados do usuário). Sem banco informado (testes, capturas) o serviço usa memória.

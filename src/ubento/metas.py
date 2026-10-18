@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from .nucleo.avaliacao import ProgressoAvaliado, ResultadoAvaliacao, avaliar_meta
@@ -41,6 +42,11 @@ NAO_AVALIADA, PENDENTE_DE_COMPROVACAO, COMPROVADA, REVERTIDA = "nao_avaliada", "
 class ExecucaoRegistrada:
     execucao: Execucao
     situacao: str
+    vinculo: VinculoManual | None = None  # decisão humana que ligou a execução a um registro externo depois
+
+    @property
+    def sem_referencia_externa(self) -> bool:
+        return not self.execucao.referencias_externas and self.vinculo is None
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,14 @@ class PainelMeta:
     ativo_id: str
     prazo: datetime
     fonte_simulada: bool = True
+
+    @property
+    def quantidade_registrada_pendente(self) -> Decimal:
+        """Líquida das execuções registradas que ainda não foram comprovadas (estorno subtrai). NÃO é progresso."""
+        return sum(
+            (-r.execucao.quantidade_liquida if r.execucao.lado is LadoExecucao.ESTORNO_COMPRA else r.execucao.quantidade_liquida
+             for r in self.execucoes if r.situacao == PENDENTE_DE_COMPROVACAO), Decimal(0),
+        )
 
     @property
     def pode_avancar(self) -> bool:
@@ -100,11 +114,60 @@ class ServicoMetas:
             original = next((o for o in existentes if o.id == execucao.estorna_execucao_id), None)
             if original is None or original.lado is not LadoExecucao.COMPRA:
                 raise ErroDeRegistro(f"o estorno aponta para {execucao.estorna_execucao_id}, que não é uma compra registrada nesta meta")
-        usadas = {(r.fonte_id, r.id_externo): r.quantidade_bruta_alocada for o in existentes for r in o.referencias_externas}
+        usadas = self._referencias_em_uso(meta_id)
         for r in execucao.referencias_externas:
-            if (r.fonte_id, r.id_externo) in usadas and (usadas[(r.fonte_id, r.id_externo)] is None or r.quantidade_bruta_alocada is None):
+            outros = usadas.get((r.fonte_id, r.id_externo), [])
+            if any(alocada is None or r.quantidade_bruta_alocada is None for _, alocada in outros):
                 raise ErroDeRegistro(f"o registro externo {r.fonte_id}/{r.id_externo} já está vinculado a outra execução desta meta")
         self.repo.registrar_entrada(meta_id, "execucoes", execucao)
+        return True
+
+    def _referencias_em_uso(self, meta_id: str) -> dict[tuple[str, str], list[tuple[str, object]]]:
+        """(fonte, id externo) -> [(execução, alocação)] pelas referências declaradas E pelos vínculos manuais."""
+        uso: dict[tuple[str, str], list[tuple[str, object]]] = {}
+        for o in self.repo.entradas(meta_id, "execucoes", Execucao):
+            for r in o.referencias_externas:
+                uso.setdefault((r.fonte_id, r.id_externo), []).append((o.id, r.quantidade_bruta_alocada))
+        for v in self.repo.entradas(meta_id, "vinculos_manuais", VinculoManual):
+            uso.setdefault((v.fonte_id, v.id_externo), []).append((v.execucao_id, v.quantidade_bruta_alocada))
+        return uso
+
+    def registros_disponiveis(self, meta_id: str) -> list[RegistroExterno]:
+        """Registros externos importados que ainda não pertencem a nenhuma execução da meta (candidatos a vínculo manual), última versão de cada."""
+        uso = self._referencias_em_uso(meta_id)
+        ultimos: dict[tuple[str, str], RegistroExterno] = {}
+        for r in self.repo.entradas(meta_id, "registros_externos", RegistroExterno):
+            if r.chave not in uso and (r.chave not in ultimos or r.versao >= ultimos[r.chave].versao):
+                ultimos[r.chave] = r
+        return list(ultimos.values())
+
+    def vincular_manualmente(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str, autor: str, justificativa: str) -> bool:
+        """Liga, DEPOIS, uma execução registrada a um registro externo já importado (decisão humana, com autor e justificativa).
+
+        Não edita a execução: acrescenta um `VinculoManual` ao histórico. O vínculo vale a partir de `em` (o instante de referência:
+        o mais tardio entre a última avaliação, a confirmação da execução e o recebimento do registro). Devolve False se esse mesmo
+        vínculo já existe; levanta `ErroDeRegistro` se a execução ou o registro não existem, ou se o registro já pertence a outra execução.
+        A comprovação continua sendo decidida pela conciliação: o vínculo só diz QUAL registro externo corresponde.
+        """
+        self.repo.carregar_meta(meta_id)
+        execucao = next((e for e in self.repo.entradas(meta_id, "execucoes", Execucao) if e.id == execucao_id), None)
+        if execucao is None:
+            raise ErroDeRegistro(f"a execução {execucao_id} não está registrada nesta meta")
+        registros = [r for r in self.repo.entradas(meta_id, "registros_externos", RegistroExterno) if r.chave == (fonte_id, id_externo)]
+        if not registros:
+            raise ErroDeRegistro(f"o registro externo {fonte_id}/{id_externo} ainda não foi importado: importe a evidência primeiro")
+        if any((r.fonte_id, r.id_externo) == (fonte_id, id_externo) for r in execucao.referencias_externas):
+            return False  # a execução já declarava essa referência
+        usados = self._referencias_em_uso(meta_id).get((fonte_id, id_externo), [])
+        if any(dono == execucao_id for dono, _ in usados):
+            return False  # mesmo vínculo já registrado: nada se duplica
+        if usados:
+            raise ErroDeRegistro(f"o registro externo {fonte_id}/{id_externo} já está vinculado a outra execução desta meta ({usados[0][0]})")
+        ultima = self.repo.ultima_avaliacao(meta_id)
+        em = max(i for i in (ultima[0].avaliada_em if ultima else None, execucao.confirmada_em, *(r.recebido_em for r in registros)) if i is not None)
+        vinculo = VinculoManual(execucao_id=execucao_id, fonte_id=fonte_id, id_externo=id_externo, autor=autor.strip(), justificativa=justificativa.strip(), em=em)
+        self.repo.registrar_entrada(meta_id, "vinculos_manuais", vinculo)
+        self.reavaliar(meta_id, em)
         return True
 
     def importar_evidencia(self, meta_id: str, evidencia: EvidenciaExterna) -> int:
@@ -165,6 +228,7 @@ class ServicoMetas:
         razao = self.repo.razao(meta_id)
         pendentes = {pe.referencia for pe in ultima[1].completude.pendencias} if ultima else set()
         registradas = []
+        vinculos = self.repo.entradas(meta_id, "vinculos_manuais", VinculoManual)
         for ex in self.repo.entradas(meta_id, "execucoes", Execucao):
             eventos_ex = [e for e in razao if e.alvo == ex.id]
             if eventos_ex and eventos_ex[-1].tipo is TipoEventoConciliacao.EXECUCAO_CONCILIADA:
@@ -175,7 +239,7 @@ class ServicoMetas:
                 situacao = PENDENTE_DE_COMPROVACAO
             else:
                 situacao = NAO_AVALIADA
-            registradas.append(ExecucaoRegistrada(ex, situacao))
+            registradas.append(ExecucaoRegistrada(ex, situacao, next((v for v in reversed(vinculos) if v.execucao_id == ex.id), None)))
         return PainelMeta(
             meta_id=meta_id, descricao=self.repo.descricao(meta_id), agente_id=self.repo.agente_da_meta(meta_id),
             estado=ultima[0].estado if ultima else None, avaliacao=ultima[0] if ultima else None, progresso=ultima[1] if ultima else None,
