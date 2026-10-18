@@ -10,7 +10,7 @@ PROIBIDOS_NO_CODIGO = ("PySide6", "PyQt5", "PyQt6", "socket", "urllib", "http", 
 
 def test_nucleo_nao_carrega_qt_em_tempo_de_execucao():
     codigo = (
-        "import sys; sys.path.insert(0, %r); import ubento.nucleo, ubento.nucleo.conciliacao; "
+        "import sys; sys.path.insert(0, %r); import ubento.nucleo, ubento.nucleo.conciliacao, ubento.nucleo.avaliacao, ubento.nucleo.regras; "
         "qt = [m for m in sys.modules if m.split('.')[0] in {'PySide6', 'PyQt5', 'PyQt6'}]; "
         "print(qt); sys.exit(1 if qt else 0)"
     ) % str(SRC)

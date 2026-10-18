@@ -1,4 +1,9 @@
 # Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+coberturas_execucoes:
+- consultada_em: '2026-10-20T11:30:00Z'
+  fim: '2026-10-20T11:30:00Z'
+  fonte_id: corretora-sim
+  inicio: '2026-10-20T09:00:00Z'
 descricao: O registro externo só chega às 13:00. Antes disso a execução fica pendente e, passada a janela de atraso, sem registro externo.
 execucoes:
 - ativo_id: tokx

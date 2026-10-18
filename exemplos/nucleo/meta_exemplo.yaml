@@ -12,6 +12,7 @@ objetivo:
   prazo: "2027-01-16T23:59:59Z"
 mercado:
   mercado_id: bolsa-a
+  conta_id: conta-principal
   incremento_preco: "0.0001"
   incremento_quantidade: "0.01"
 custos:

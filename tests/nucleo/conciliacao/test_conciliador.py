@@ -6,6 +6,8 @@ import pytest
 from ubento.nucleo.conciliacao import Confirmacao, Motivo, PoliticaConciliacao, StatusConciliacao, VinculoManual
 from ubento.nucleo.esquema import Execucao
 
+from ubento.nucleo.conciliacao import CoberturaExecucoes
+
 from .fabrica import AGORA, BASE, FONTE, META, POLITICA, comprovado, d, execucao, externo, rodar, status
 
 C = StatusConciliacao
@@ -60,8 +62,8 @@ def test_taxa_em_outro_ativo_nao_subtrai_unidades_e_vira_custo():
     r = rodar([e], [x])
     assert status(r, "ex-1").status is C.CONCILIADA
     assert comprovado(r) == d("99.9")  # 0,002 BNB não tirou unidade nenhuma de TOKX
-    custos = {c.ativo_id: c.valor for c in r.progresso[0].custos}
-    assert custos == {"usd": d("5"), "bnb": d("0.002")}  # cada ativo na sua moeda, sem conversão
+    custos = {c.ativo_id: (c.verificado, c.nao_verificado) for c in r.progresso[0].custos}
+    assert custos == {"usd": (d("5"), d("0")), "bnb": (d("0.002"), d("0"))}  # cada ativo na sua moeda, sem conversão
 
 
 def test_taxa_em_outro_ativo_nao_registrada_internamente_diverge():
@@ -121,8 +123,10 @@ def test_agregada_com_um_preenchimento_faltando_nao_concilia():
     e = execucao(bruta="10", taxa="0.05", preco="9.7", refs=("fill-a", "fill-b"))
     r = rodar([e], [externo("fill-a", qtd="4", preco="10", taxas=(("tokx", "0.02"),))], agora=BASE + timedelta(minutes=30))
     assert status(r, "ex-1").status is C.PENDENTE  # dentro da janela de atraso
-    r2 = rodar([e], [externo("fill-a", qtd="4", preco="10", taxas=(("tokx", "0.02"),))], agora=BASE + timedelta(hours=5))
-    assert status(r2, "ex-1").status is C.SEM_REGISTRO_EXTERNO
+    parcial = [externo("fill-a", qtd="4", preco="10", taxas=(("tokx", "0.02"),))]
+    tarde = BASE + timedelta(hours=5)
+    assert status(rodar([e], parcial, agora=tarde), "ex-1").status is C.NAO_VERIFICAVEL  # sem cobertura da consulta
+    assert status(rodar([e], parcial, agora=tarde, coberturas_execucoes=[_cobertura(tarde)]), "ex-1").status is C.SEM_REGISTRO_EXTERNO
 
 
 def test_registro_com_preenchimento_nao_contabilizado_aparece_como_orfao():
@@ -175,8 +179,11 @@ def test_registro_externo_futuro_nao_existe_ainda():
     cedo = BASE + timedelta(minutes=30)
     r = rodar([execucao()], [externo(recebido_min=600)], agora=cedo)
     assert status(r, "ex-1").status is C.PENDENTE and r.orfaos == ()  # ainda dentro da janela de atraso
-    depois = rodar([execucao()], [externo(recebido_min=600)], agora=BASE + timedelta(hours=3))
-    assert status(depois, "ex-1").status is C.SEM_REGISTRO_EXTERNO  # passou da janela e o registro continua "no futuro"
+    tarde = BASE + timedelta(hours=3)
+    sem = rodar([execucao()], [externo(recebido_min=600)], agora=tarde)
+    assert status(sem, "ex-1").status is C.NAO_VERIFICAVEL  # passou da janela, mas ninguém garantiu a cobertura
+    com = rodar([execucao()], [externo(recebido_min=600)], agora=tarde, coberturas_execucoes=[_cobertura(tarde)])
+    assert status(com, "ex-1").status is C.SEM_REGISTRO_EXTERNO
 
 
 def test_execucao_confirmada_depois_de_agora_nao_entra():
@@ -382,3 +389,82 @@ def test_execucao_valida_os_novos_campos():
         execucao(moeda_cotacao_id="usd", taxas_outros_ativos=[{"ativo_id": "usd", "valor": "1"}])
     assert isinstance(execucao(), Execucao)
     assert META and AGORA
+
+
+# -- cobertura da consulta: idade da execução x cobertura -------------------------------------------------------------------------------
+
+
+def _cobertura(consultada_em, *, fonte=FONTE, ativo=None, inicio=None, fim=None):
+    return CoberturaExecucoes(fonte_id=fonte, ativo_id=ativo, inicio=inicio or BASE - timedelta(hours=1),
+                              fim=fim or consultada_em, consultada_em=consultada_em)
+
+
+def test_ausencia_em_recorte_incompleto_nao_prova_ausencia():
+    """Idade passou da janela, mas a consulta não cobria o instante da execução: não verificável, não 'inexistente'."""
+    tarde = BASE + timedelta(hours=5)
+    curta = _cobertura(BASE + timedelta(minutes=5), fim=BASE + timedelta(minutes=5))  # termina antes de executada_em + tolerância
+    r = rodar([execucao()], [], agora=tarde, coberturas_execucoes=[curta])
+    e = status(r, "ex-1")
+    assert e.status is C.NAO_VERIFICAVEL and Motivo.COBERTURA_INSUFICIENTE in e.motivos and e.efeito_no_progresso == 0
+
+
+@pytest.mark.parametrize("cobertura, esperado", [
+    (_cobertura(BASE + timedelta(hours=3)), C.SEM_REGISTRO_EXTERNO),  # cobre e a consulta veio tarde o bastante
+    (_cobertura(BASE + timedelta(hours=3), fonte="outra-fonte"), C.NAO_VERIFICAVEL),  # cobertura de OUTRA fonte
+    (_cobertura(BASE + timedelta(hours=3), ativo="abc"), C.NAO_VERIFICAVEL),  # cobertura de OUTRO ativo
+    (_cobertura(BASE + timedelta(hours=3), ativo="tokx"), C.SEM_REGISTRO_EXTERNO),
+    (_cobertura(BASE + timedelta(minutes=30), fim=BASE + timedelta(minutes=30)), C.NAO_VERIFICAVEL),  # consulta antes de a fonte ter tido tempo
+])
+def test_prova_de_ausencia_exige_fonte_ativo_periodo_e_tempo(cobertura, esperado):
+    r = rodar([execucao()], [], agora=BASE + timedelta(hours=4), coberturas_execucoes=[cobertura])
+    assert status(r, "ex-1").status is esperado
+
+
+def test_cobertura_ainda_nao_consultada_nao_conta():
+    futura = _cobertura(BASE + timedelta(hours=9))
+    r = rodar([execucao()], [], agora=BASE + timedelta(hours=4), coberturas_execucoes=[futura])
+    assert status(r, "ex-1").status is C.NAO_VERIFICAVEL
+
+
+def test_dentro_da_janela_de_atraso_continua_pendente_mesmo_com_cobertura():
+    r = rodar([execucao()], [], agora=BASE + timedelta(minutes=30), coberturas_execucoes=[_cobertura(BASE + timedelta(minutes=30))])
+    assert status(r, "ex-1").status is C.PENDENTE
+
+
+def test_cobertura_nao_apaga_execucao_ja_conciliada():
+    """Existindo o registro externo, a cobertura é irrelevante: a execução histórica continua conciliada."""
+    r = rodar([execucao()], [externo()], agora=BASE + timedelta(days=30), coberturas_execucoes=[])
+    assert status(r, "ex-1").status is C.CONCILIADA and comprovado(r) == d("9.95")
+
+
+# -- custos verificados x não verificados ----------------------------------------------------------------------------------------------------
+
+
+def test_custo_fixo_nunca_e_verificado_pela_conciliacao():
+    e = execucao(bruta="100", taxa="0.1", preco="10", taxa_na_cotacao="5", custo_fixo_real="2", moeda_cotacao_id="usd")
+    x = externo(qtd="100", preco="10", taxas=(("tokx", "0.1"), ("usd", "5")))
+    r = rodar([e], [x])
+    assert status(r, "ex-1").status is C.CONCILIADA
+    p = r.progresso[0]
+    custos = {c.ativo_id: (c.verificado, c.nao_verificado) for c in p.custos}
+    assert custos == {"usd": (d("5"), d("2"))}  # a taxa foi conferida; o custo fixo ficou sem evidência
+    gasto = {g.ativo_id: (g.comprovado, g.nao_comprovado) for g in p.gasto}
+    assert gasto == {"usd": (d("1005"), d("2"))}  # 100 × 10 + 5 comprovados; 2 não
+
+
+def test_execucao_nao_conciliada_so_gera_limite_superior_de_gasto():
+    r = rodar([execucao(preco="10", taxa_na_cotacao="1", moeda_cotacao_id="usd")], [], agora=BASE + timedelta(minutes=10))
+    assert status(r, "ex-1").status is C.PENDENTE
+    gasto = r.progresso[0].gasto[0]
+    assert (gasto.comprovado, gasto.nao_comprovado) == (d("0"), d("101"))
+    custos = r.progresso[0].custos[0]
+    assert (custos.verificado, custos.nao_verificado) == (d("0"), d("1"))  # taxa de execução pendente não é "verificada"
+
+
+def test_estorno_conciliado_reduz_o_gasto_comprovado():
+    estorno = execucao("ex-2", bruta="9.95", taxa="0", lado="estorno_compra", estorna_execucao_id="ex-1", refs=("fill-002",), minutos=60,
+                       preco="9.5", moeda_cotacao_id="usd")
+    r = rodar([execucao(preco="9.5", moeda_cotacao_id="usd"), estorno],
+              [externo(preco="9.5"), externo("fill-002", qtd="9.95", taxas=(), lado="estorno_compra", estorna="fill-001", minutos=60)])
+    gasto = r.progresso[0].gasto[0]
+    assert gasto.comprovado == d("95") - d("94.525")  # 10 × 9,5 pago − 9,95 × 9,5 devolvido

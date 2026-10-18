@@ -7,7 +7,6 @@ conciliador enxerga só o que já tinha chegado até `agora`, o que permite repr
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -19,7 +18,7 @@ from ..tipos import Identificador, Instante, Numero, Texto
 from .conciliador import conciliar
 from .eventos import EventoConciliacao, diferenciar
 from .modelos import (
-    Cobertura, Confirmacao, Motivo, Movimentacao, PoliticaConciliacao, RegistroExterno, RelatorioConciliacao,
+    Cobertura, CoberturaExecucoes, Confirmacao, Motivo, Movimentacao, PoliticaConciliacao, RegistroExterno, RelatorioConciliacao,
     SaldoObservado, StatusConciliacao, StatusSaldo, VinculoManual,
 )
 
@@ -52,6 +51,7 @@ class ArquivoReproducao(Modelo):
     movimentacoes: tuple[Movimentacao, ...] = ()
     saldos: tuple[SaldoObservado, ...] = ()
     coberturas: tuple[Cobertura, ...] = ()
+    coberturas_execucoes: tuple[CoberturaExecucoes, ...] = ()
     vinculos_manuais: tuple[VinculoManual, ...] = ()
     momentos: Annotated[tuple[Momento, ...], Field(min_length=1)]
 
@@ -63,7 +63,8 @@ def carregar_reproducao(caminho: str | Path) -> ArquivoReproducao:
 def executar_momento(arquivo: ArquivoReproducao, agora: datetime) -> RelatorioConciliacao:
     return conciliar(
         arquivo.execucoes, arquivo.registros_externos, politica=arquivo.politica, agora=agora,
-        movimentacoes=arquivo.movimentacoes, saldos=arquivo.saldos, coberturas=arquivo.coberturas, vinculos=arquivo.vinculos_manuais,
+        movimentacoes=arquivo.movimentacoes, saldos=arquivo.saldos, coberturas=arquivo.coberturas,
+        coberturas_execucoes=arquivo.coberturas_execucoes, vinculos=arquivo.vinculos_manuais,
     )
 
 

@@ -130,7 +130,9 @@ def test_json_canonico_e_idempotente_e_sem_espacos(arvore):
 
     texto = json_canonico(arvore)
     assert json_canonico(json.loads(texto)) == texto
-    assert ": " not in texto and ", " not in texto
+    # compacto: idêntico a reserializar o que ele mesmo decodifica, sem espaço fora das strings
+    # (não se pode testar a ausência de ", " no texto: o CONTEÚDO de uma string pode conter isso)
+    assert texto == json.dumps(json.loads(texto), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 @settings(max_examples=100)

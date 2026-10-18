@@ -1,0 +1,39 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_conciliacao.py (não edite à mão; mude o script).
+descricao: "O registro externo não aparece e NINGUÉM garantiu que a consulta cobria o período: a ausência não prova nada. Não verificável, e nunca
+  'sem registro'."
+execucoes:
+- ativo_id: tokx
+  confirmada_em: '2026-10-20T10:01:00Z'
+  executada_em: '2026-10-20T10:00:00Z'
+  fonte_id: registro-manual
+  id: ex-1
+  lado: compra
+  meta_id: meta-tokx-001
+  origem: simulado
+  preco_executado: '9.5'
+  quantidade_bruta: '10'
+  quantidade_liquida: '9.95'
+  referencias_externas:
+  - fonte_id: corretora-sim
+    id_externo: fill-001
+  taxa_no_ativo: '0.05'
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    comprovado:
+      meta-tokx-001: '0'
+    confirmacao: incompleta
+    declarado:
+      meta-tokx-001: '9.95'
+    execucoes:
+      ex-1: nao_verificavel
+    motivos:
+      ex-1:
+      - cobertura_insuficiente
+origem: simulado
+politica:
+  janela_atraso_segundos: 3600
+  janela_candidatos_segundos: 300
+  tolerancia_horario_segundos: 60
+registros_externos: []
+schema_versao: 1

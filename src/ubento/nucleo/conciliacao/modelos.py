@@ -37,7 +37,8 @@ class StatusConciliacao(StrEnum):
     CONCILIADA = "conciliada"
     DIVERGENTE = "divergente"
     PENDENTE = "pendente"
-    SEM_REGISTRO_EXTERNO = "sem_registro_externo"
+    SEM_REGISTRO_EXTERNO = "sem_registro_externo"  # ausência PROVADA: a consulta cobria o período
+    NAO_VERIFICAVEL = "nao_verificavel"  # ausência NÃO provada: a consulta não cobria o período
     REVISAO = "revisao"
 
 
@@ -114,6 +115,7 @@ class RegistroExterno(Modelo):
     versao: Annotated[Inteiro, Field(ge=1)] = 1
     id_ordem: Identificador | None = None  # agrupa execuções parciais de uma mesma ordem
     mercado_id: Identificador
+    conta_id: Identificador | None = None  # conta/carteira na fonte; None = desconhecida
     ativo_id: Identificador
     moeda_cotacao_id: Identificador
     lado: LadoExecucao
@@ -202,6 +204,28 @@ class Cobertura(Modelo):
         return self
 
 
+class CoberturaExecucoes(Modelo):
+    """A fonte garante que a consulta feita em `consultada_em` devolveu TODAS as execuções do período.
+
+    Só com isto a ausência de um registro externo prova que ele não existe. Sem cobertura, a ausência é
+    "não verificável": nem confirma nem desmente a execução (e não apaga prova anterior).
+    """
+
+    fonte_id: Identificador
+    ativo_id: Identificador | None = None  # None = todos os ativos da fonte
+    inicio: Instante
+    fim: Instante
+    consultada_em: Instante
+
+    @model_validator(mode="after")
+    def _intervalo(self) -> CoberturaExecucoes:
+        if self.fim <= self.inicio:
+            raise ValueError("fim deve ser posterior a inicio")
+        if self.consultada_em < self.fim:
+            raise ValueError("consultada_em anterior ao fim do período coberto")
+        return self
+
+
 class PoliticaConciliacao(Modelo):
     """Parâmetros explícitos; não existe limite universal."""
 
@@ -234,10 +258,23 @@ class Diferenca(Modelo):
 
 
 class CustoPorAtivo(Modelo):
-    """Custo em UM ativo. Valores de ativos diferentes nunca são somados nem convertidos."""
+    """Custos (taxas e custo fixo) em UM ativo. Ativos diferentes nunca são somados nem convertidos.
+
+    `verificado`: taxas conferidas contra registro externo de uma execução conciliada.
+    `nao_verificado`: o que não tem evidência externa (custo fixo, ou custos de execuções ainda não conciliadas).
+    """
 
     ativo_id: Identificador
-    valor: Quantidade
+    verificado: Quantidade
+    nao_verificado: Quantidade
+
+
+class GastoPorAtivo(Modelo):
+    """Gasto total na moeda de cotação (valor pago nas compras + taxas + custo fixo, menos estornos)."""
+
+    ativo_id: Identificador
+    comprovado: Numero  # execuções conciliadas: valor pago e taxa na cotação, líquidos de estornos
+    nao_comprovado: Quantidade  # custo fixo e tudo o que ainda não foi conciliado (limite superior)
 
 
 class ResultadoExecucao(Modelo):
@@ -253,6 +290,11 @@ class ResultadoExecucao(Modelo):
     diferencas: tuple[Diferenca, ...] = ()
     efeito_no_progresso: Numero = Decimal(0)  # com sinal; 0 se não conciliada
     declarado: Numero = Decimal(0)  # com sinal; o que foi registrado internamente
+    origem: OrigemDado = OrigemDado.SIMULADO
+    estorna_execucao_id: Identificador | None = None
+    moeda_gasto: Identificador | None = None
+    gasto_comprovado: Numero = Decimal(0)
+    gasto_nao_comprovado: Quantidade = Decimal(0)
 
 
 class ResultadoExterno(Modelo):
@@ -264,7 +306,16 @@ class ResultadoExterno(Modelo):
     ativo_id: Identificador
     lado: LadoExecucao
     quantidade: Positivo
+    preco: Positivo
+    moeda_cotacao_id: Identificador
+    taxas: tuple[TaxaExterna, ...] = ()
+    mercado_id: Identificador
+    conta_id: Identificador | None = None
+    origem: OrigemDado
+    status: StatusRegistroExterno
     executado_em: Instante
+    recebido_em: Instante
+    estorna_id_externo: Identificador | None = None
     motivos: tuple[Motivo, ...] = (Motivo.SEM_REGISTRO_INTERNO,)
 
 
@@ -293,8 +344,8 @@ class ProgressoMeta(Modelo):
     por_status: dict[Identificador, Natural]
     taxas_no_ativo: Numero  # líquida: estornos devolvem
     custos: tuple[CustoPorAtivo, ...]
-    orfaos_do_ativo: Natural
-    confirmacao: Confirmacao
+    gasto: tuple[GastoPorAtivo, ...] = ()
+    confirmacao: Confirmacao  # só das execuções da meta; órfãos são avaliados com o escopo do contrato
     pendencias: tuple[Texto, ...] = ()
 
 

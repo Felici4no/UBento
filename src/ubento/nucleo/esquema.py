@@ -407,6 +407,7 @@ class Objetivo(Modelo):
 
 class MercadoContrato(Modelo):
     mercado_id: Identificador
+    conta_id: Identificador | None = None  # conta/carteira em que a meta opera; None = não informada (escopo indeterminado)
     incremento_preco: Positivo
     incremento_quantidade: Positivo
 

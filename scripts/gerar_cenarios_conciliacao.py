@@ -107,6 +107,15 @@ CENARIOS["10_dados_atrasados"] = cenario(
         momento("12:00:00", execucoes={"ex-1": "sem_registro_externo"}, motivos={"ex-1": ["registro_externo_nao_encontrado"]}, comprovado={META: "0"}, eventos=[]),
         momento("14:00:00", execucoes={"ex-1": "conciliada"}, comprovado={META: "9.95"}, confirmacao="confirmada", eventos=["execucao_conciliada"]),
     ],
+    coberturas_execucoes=[{"fonte_id": FONTE, "inicio": t("09:00:00"), "fim": t("11:30:00"), "consultada_em": t("11:30:00")}],
+)
+
+CENARIOS["24_ausencia_sem_cobertura"] = cenario(
+    "O registro externo não aparece e NINGUÉM garantiu que a consulta cobria o período: a ausência não prova nada. Não verificável, e nunca 'sem registro'.",
+    [ex("ex-1", refs=["fill-001"])],
+    [],
+    [momento("12:00:00", execucoes={"ex-1": "nao_verificavel"}, motivos={"ex-1": ["cobertura_insuficiente"]}, comprovado={META: "0"},
+             declarado={META: "9.95"}, confirmacao="incompleta")],
 )
 
 CENARIOS["11_correcao_externa"] = cenario(

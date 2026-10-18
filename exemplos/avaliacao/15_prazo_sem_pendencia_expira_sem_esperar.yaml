@@ -1,0 +1,131 @@
+# Cenário FICTÍCIO gerado por scripts/gerar_cenarios_meta.py (não edite à mão; mude o script).
+ativada_em: '2026-10-20T08:00:00Z'
+descricao: Sem execução e sem nenhuma evidência que possa mudar o resultado, passado o prazo a meta expira de imediato ('prazo_encerrado'), sem esperar a 
+  carência.
+execucoes: []
+meta:
+  analise_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  analise_id: analise-tokx-001
+  analise_versao: 1
+  criada_em: '2026-10-20T07:30:00Z'
+  custos:
+    custo_fixo: '0'
+    taxa_proporcional: '0.005'
+    tratamento_taxa: cobrada_na_cotacao
+  fundamentacao:
+    cenarios_origem:
+    - cen-referencia
+    justificativa: Cenário de reprodução (simulado).
+  id: meta-tokx-001
+  mercado:
+    conta_id: conta-a
+    incremento_preco: '0.0001'
+    incremento_quantidade: '0.01'
+    mercado_id: bolsa-a
+  objetivo:
+    ativo_id: tokx
+    moeda_cotacao_id: usd
+    prazo: '2026-10-20T16:00:00Z'
+    quantidade_alvo: '10'
+    tipo: acumular_quantidade
+  politicas:
+    carencia_dados_segundos: 7200
+    validades:
+    - metrica_id: preco_executavel
+      validade_maxima_segundos: 86400
+    - metrica_id: retorno_7d
+      validade_maxima_segundos: 86400
+  recursos:
+    exposicao_maxima: '0.5'
+    moeda_orcamento_id: usd
+    orcamento: '1000'
+    saldo_reservado: '1000'
+  regras:
+    bloqueios:
+    - direita:
+        tipo: valor
+        unidade: USD
+        valor: '0'
+      esquerda:
+        ativo_id: tokx
+        mercado_id: bolsa-a
+        metrica_id: preco_executavel
+        tipo: metrica
+      id: bq-preco
+      op: gt
+    entrada:
+    - direita:
+        tipo: valor
+        unidade: USD
+        valor: '9.9'
+      esquerda:
+        ativo_id: tokx
+        mercado_id: bolsa-a
+        metrica_id: preco_executavel
+        tipo: metrica
+      id: en-preco
+      op: lte
+    invalidacao:
+    - direita:
+        tipo: valor
+        unidade: razao
+        valor: '-0.30'
+      esquerda:
+        ativo_id: tokx
+        janela_segundos: 604800
+        mercado_id: bolsa-a
+        metrica_id: retorno_7d
+        tipo: metrica
+      id: inv-queda
+      op: lt
+  reprodutibilidade:
+    versao_algoritmo: motor-0.3.0
+    versao_catalogo: catalogo-1
+    versao_politica: politica-1
+momentos:
+- agora: '2026-10-20T12:00:00Z'
+  esperado:
+    estado: ativa
+    eventos:
+    - ativada
+    quantidade_comprovada: '0'
+- agora: '2026-10-20T17:00:00Z'
+  esperado:
+    aguardando_evidencia: false
+    estado: expirada
+    eventos:
+    - expirada
+    evidencia_em:
+      expirada: '2026-10-20T16:00:00Z'
+    motivo_evento:
+      expirada: prazo_encerrado
+observacoes:
+- ativo_id: tokx
+  coletado_em: '2026-10-20T08:30:00Z'
+  fonte_id: fonte-sim
+  id: o-preco-0
+  mercado_id: bolsa-a
+  metrica_id: preco_executavel
+  observado_em: '2026-10-20T08:30:00Z'
+  origem: simulado
+  qualidade: disponivel
+  unidade: USD
+  valor: '12'
+- ativo_id: tokx
+  coletado_em: '2026-10-20T08:30:00Z'
+  fonte_id: fonte-sim
+  id: o-ret-0
+  mercado_id: bolsa-a
+  metrica_id: retorno_7d
+  observado_em: '2026-10-20T08:30:00Z'
+  origem: simulado
+  qualidade: disponivel
+  unidade: razao
+  valor: '0.01'
+origem: simulado
+politica_conciliacao:
+  janela_atraso_segundos: 3600
+  tolerancia_horario_segundos: 60
+registros_externos: []
+responsavel: Pessoa de exemplo
+schema_versao: 1

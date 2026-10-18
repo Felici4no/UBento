@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from typing import Iterable, Sequence
@@ -17,7 +17,7 @@ from ..canonico import hash_canonico, json_canonico
 from ..esquema import Execucao, LadoExecucao
 from ..tipos import formatar_instante, normalizar_decimal
 from .modelos import (
-    INFORMATIVOS, Cobertura, Confirmacao, CustoPorAtivo, Diferenca, Motivo, Movimentacao, PoliticaConciliacao,
+    INFORMATIVOS, Cobertura, CoberturaExecucoes, Confirmacao, CustoPorAtivo, Diferenca, GastoPorAtivo, Motivo, Movimentacao, PoliticaConciliacao,
     ProgressoMeta, RefResolvida, RegistroExterno, RelatorioConciliacao, ResultadoExecucao, ResultadoExterno,
     SaldoObservado, StatusConciliacao, StatusRegistroExterno, VinculoManual,
 )
@@ -55,6 +55,12 @@ class _Ref:
         return (self.fonte_id, self.id_externo)
 
 
+def _dec(valor: Fraction) -> Decimal:
+    with localcontext() as ctx:
+        ctx.prec = 60
+        return Decimal(valor.numerator) / Decimal(valor.denominator)
+
+
 @dataclass
 class _Contexto:
     politica: PoliticaConciliacao
@@ -64,6 +70,7 @@ class _Contexto:
     corrigidas: set[Chave]
     problemas_de_alocacao: dict[Chave, Motivo] = field(default_factory=dict)
     reivindicadas: set[Chave] = field(default_factory=set)
+    coberturas: Sequence[CoberturaExecucoes] = ()
 
 
 # -- preparação dos dados ----------------------------------------------------------------------------------
@@ -209,6 +216,21 @@ def _comparar(execucao: Execucao, pares: list[tuple[_Ref, RegistroExterno]], pol
     return diferencas, motivos
 
 
+def _ausencia_provada(execucao: Execucao, ref: _Ref, ctx: _Contexto) -> bool:
+    """A ausência do registro externo só é prova se uma consulta COMPLETA daquele período já tinha sido feita.
+
+    Idade da execução diz se o registro já deveria existir; cobertura diz se a consulta teria visto o registro.
+    São coisas diferentes: sem cobertura, a ausência é só "não verificável".
+    """
+    tol = timedelta(seconds=ctx.politica.tolerancia_horario_segundos)
+    minimo = execucao.confirmada_em + timedelta(seconds=ctx.politica.janela_atraso_segundos)
+    return any(
+        c.fonte_id == ref.fonte_id and c.ativo_id in (None, execucao.ativo_id)
+        and c.inicio <= execucao.executada_em - tol and c.fim >= execucao.executada_em + tol and c.consultada_em >= minimo
+        for c in ctx.coberturas
+    )
+
+
 def _candidatos(execucao: Execucao, atual: dict[Chave, RegistroExterno], reivindicadas: set[Chave], politica: PoliticaConciliacao) -> tuple[RefResolvida, ...]:
     """Sugestões para uma pessoa. NUNCA viram elo: a correspondência exige identificador."""
     achados = []
@@ -230,6 +252,20 @@ def _candidatos(execucao: Execucao, atual: dict[Chave, RegistroExterno], reivind
 # -- avaliação de uma execução --------------------------------------------------------------------------------------------
 
 
+def _gastos(execucao: Execucao, conciliada: bool) -> tuple[Decimal, Decimal]:
+    """(comprovado, não comprovado) na moeda de cotação.
+
+    Conciliada: valor pago e taxa na cotação são comprovados (foram conferidos); o custo fixo NÃO (não há evidência
+    externa dele). Não conciliada: nada é comprovado e a compra inteira é um limite superior de gasto.
+    """
+    nocional = _fr(execucao.quantidade_bruta) * _fr(execucao.preco_executado)
+    compra = execucao.lado is LadoExecucao.COMPRA
+    taxa, fixo = _fr(execucao.taxa_na_cotacao), _fr(execucao.custo_fixo_real)
+    if conciliada:
+        return _dec((nocional if compra else -nocional) + taxa), _dec(fixo)
+    return Decimal(0), _dec((nocional if compra else Fraction(0)) + taxa + fixo)
+
+
 def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bool, conflitante: bool) -> ResultadoExecucao:
     assinatura = 1 if execucao.lado is LadoExecucao.COMPRA else -1
     declarado = Decimal(assinatura) * execucao.quantidade_liquida
@@ -240,11 +276,15 @@ def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bo
         if duplicada:
             extras.append(Motivo.DUPLICATA_IDENTICA)
         extras += [Motivo.CORRIGIDO_EXTERNAMENTE] if any((r.fonte_id, r.id_externo) in ctx.corrigidas for r in externos) else []
+        comprovado_g, nao_comprovado_g = _gastos(execucao, status is StatusConciliacao.CONCILIADA)
+        moeda = execucao.moeda_cotacao_id or next(
+            (ctx.atual[(r.fonte_id, r.id_externo)].moeda_cotacao_id for r in externos if (r.fonte_id, r.id_externo) in ctx.atual), None)
         return ResultadoExecucao(
             execucao_id=execucao.id, meta_id=execucao.meta_id, ativo_id=execucao.ativo_id, lado=execucao.lado,
             executada_em=execucao.executada_em, status=status, motivos=ordenados + tuple(m for m in extras if m not in ordenados),
             externos=tuple(externos), candidatos=tuple(candidatos), diferencas=tuple(diferencas), efeito_no_progresso=efeito,
-            declarado=declarado if declarado_ is None else declarado_,
+            declarado=declarado if declarado_ is None else declarado_, estorna_execucao_id=execucao.estorna_execucao_id, origem=execucao.origem,
+            moeda_gasto=moeda, gasto_comprovado=comprovado_g, gasto_nao_comprovado=nao_comprovado_g,
         )
 
     if conflitante:
@@ -270,7 +310,9 @@ def _avaliar(execucao: Execucao, refs: list[_Ref], ctx: _Contexto, duplicada: bo
         idade = (ctx.agora - execucao.confirmada_em).total_seconds()
         if idade <= ctx.politica.janela_atraso_segundos:
             return resultado(StatusConciliacao.PENDENTE, [Motivo.AGUARDANDO_REGISTRO_EXTERNO], externos=externos)
-        return resultado(StatusConciliacao.SEM_REGISTRO_EXTERNO, [Motivo.REGISTRO_EXTERNO_NAO_ENCONTRADO], externos=externos)
+        if all(_ausencia_provada(execucao, r, ctx) for r in faltando):
+            return resultado(StatusConciliacao.SEM_REGISTRO_EXTERNO, [Motivo.REGISTRO_EXTERNO_NAO_ENCONTRADO], externos=externos)
+        return resultado(StatusConciliacao.NAO_VERIFICAVEL, [Motivo.COBERTURA_INSUFICIENTE], externos=externos)
     if any(g.status is StatusRegistroExterno.PENDENTE for _, g in resolvidas):
         return resultado(StatusConciliacao.PENDENTE, [Motivo.REGISTRO_EXTERNO_PENDENTE], externos=externos)
     if any(g.status is StatusRegistroExterno.CANCELADO for _, g in resolvidas):
@@ -307,15 +349,17 @@ def _revisar_estornos(resultados: dict[str, ResultadoExecucao], unicas: dict[str
             acumulado[original.id] += _fr(e.quantidade_liquida)
             continue
         antigo = resultados[e.id]
+        comprovado_g, nao_comprovado_g = _gastos(e, False)
         resultados[e.id] = antigo.model_copy(update={
             "status": StatusConciliacao.REVISAO, "motivos": tuple(dict.fromkeys((motivo, *antigo.motivos))), "efeito_no_progresso": Decimal(0),
+            "gasto_comprovado": comprovado_g, "gasto_nao_comprovado": nao_comprovado_g,
         })
 
 
 # -- progresso -----------------------------------------------------------------------------------------------------------------
 
 
-def _progresso(resultados: Sequence[ResultadoExecucao], unicas: dict[str, Execucao], orfaos: Sequence[ResultadoExterno], politica: PoliticaConciliacao) -> tuple[ProgressoMeta, ...]:
+def _progresso(resultados: Sequence[ResultadoExecucao], unicas: dict[str, Execucao]) -> tuple[ProgressoMeta, ...]:
     por_meta: dict[str, list[ResultadoExecucao]] = defaultdict(list)
     for r in resultados:
         por_meta[r.meta_id].append(r)
@@ -328,29 +372,37 @@ def _progresso(resultados: Sequence[ResultadoExecucao], unicas: dict[str, Execuc
         declarado = sum((r.declarado for r in itens), Decimal(0))
         por_status: dict[str, int] = defaultdict(int)
         taxas_ativo = Fraction(0)
-        custos: dict[str, Fraction] = defaultdict(Fraction)
+        verificado: dict[str, Fraction] = defaultdict(Fraction)
+        nao_verificado: dict[str, Fraction] = defaultdict(Fraction)
+        gasto_ok: dict[str, Fraction] = defaultdict(Fraction)
+        gasto_pendente: dict[str, Fraction] = defaultdict(Fraction)
         for r in itens:
             por_status[r.status.value] += 1
-            if r.status is StatusConciliacao.CONCILIADA:
-                e = unicas[r.execucao_id]
+            e = unicas[r.execucao_id]
+            moeda = r.moeda_gasto
+            conciliada = r.status is StatusConciliacao.CONCILIADA
+            if conciliada:
                 taxas_ativo += _fr(e.taxa_no_ativo) * (1 if e.lado is LadoExecucao.COMPRA else -1)
-                if e.moeda_cotacao_id:
-                    custos[e.moeda_cotacao_id] += _fr(e.taxa_na_cotacao) + _fr(e.custo_fixo_real)
-                for t in e.taxas_outros_ativos:
-                    custos[t.ativo_id] += _fr(t.valor)
-        n_orfaos = sum(1 for o in orfaos if ativo is not None and o.ativo_id == ativo and o.lado is LadoExecucao.COMPRA)
+            if moeda:
+                gasto_ok[moeda] += _fr(r.gasto_comprovado)
+                gasto_pendente[moeda] += _fr(r.gasto_nao_comprovado)
+                alvo = verificado if conciliada else nao_verificado  # taxas só são "verificadas" se a execução foi conciliada
+                alvo[moeda] += _fr(e.taxa_na_cotacao)
+                nao_verificado[moeda] += _fr(e.custo_fixo_real)  # nunca há evidência externa do custo fixo
+            for t in e.taxas_outros_ativos:
+                (verificado if conciliada else nao_verificado)[t.ativo_id] += _fr(t.valor)
         pendencias = [f"{r.execucao_id}: {r.status.value} ({', '.join(m.value for m in r.motivos if m not in INFORMATIVOS)})"
                       for r in itens if r.status is not StatusConciliacao.CONCILIADA]
         if ativo is None:
             pendencias.append("meta com execuções de ativos diferentes")
-        if n_orfaos and politica.orfaos_bloqueiam_confirmacao:
-            pendencias.append(f"{n_orfaos} registro(s) externo(s) de compra do ativo sem execução interna")
         saida.append(ProgressoMeta(
             meta_id=meta_id, ativo_id=ativo, comprovado=comprovado, declarado=declarado, nao_comprovado=declarado - comprovado,
             por_status=dict(sorted(por_status.items())),
-            taxas_no_ativo=Decimal(taxas_ativo.numerator) / Decimal(taxas_ativo.denominator),
-            custos=tuple(CustoPorAtivo(ativo_id=a, valor=Decimal(v.numerator) / Decimal(v.denominator)) for a, v in sorted(custos.items())),
-            orfaos_do_ativo=n_orfaos,
+            taxas_no_ativo=_dec(taxas_ativo),
+            custos=tuple(CustoPorAtivo(ativo_id=a, verificado=_dec(verificado.get(a, Fraction(0))), nao_verificado=_dec(nao_verificado.get(a, Fraction(0))))
+                         for a in sorted(set(verificado) | set(nao_verificado))),
+            gasto=tuple(GastoPorAtivo(ativo_id=a, comprovado=_dec(gasto_ok.get(a, Fraction(0))), nao_comprovado=_dec(gasto_pendente.get(a, Fraction(0))))
+                        for a in sorted(set(gasto_ok) | set(gasto_pendente))),
             confirmacao=Confirmacao.INCOMPLETA if pendencias else Confirmacao.CONFIRMADA, pendencias=tuple(pendencias),
         ))
     return tuple(saida)
@@ -359,13 +411,14 @@ def _progresso(resultados: Sequence[ResultadoExecucao], unicas: dict[str, Execuc
 # -- API -----------------------------------------------------------------------------------------------------------------------------------
 
 
-def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, saldos, coberturas, vinculos) -> str:
+def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, saldos, coberturas, coberturas_execucoes, vinculos) -> str:
     def lote(itens):
         return sorted(json_canonico(i) for i in itens)
 
     return hash_canonico({
         "agora": agora, "politica": politica, "execucoes": lote(execucoes), "externos": lote(externos),
-        "movimentacoes": lote(movimentacoes), "saldos": lote(saldos), "coberturas": lote(coberturas), "vinculos": lote(vinculos),
+        "movimentacoes": lote(movimentacoes), "saldos": lote(saldos), "coberturas": lote(coberturas),
+        "coberturas_execucoes": lote(coberturas_execucoes), "vinculos": lote(vinculos),
     }, DOMINIO_ENTRADAS)
 
 
@@ -378,19 +431,22 @@ def conciliar(
     movimentacoes: Sequence[Movimentacao] = (),
     saldos: Sequence[SaldoObservado] = (),
     coberturas: Sequence[Cobertura] = (),
+    coberturas_execucoes: Sequence[CoberturaExecucoes] = (),
     vinculos: Sequence[VinculoManual] = (),
 ) -> RelatorioConciliacao:
     """Concilia o que era conhecido em `agora`. Mesmas entradas e mesmo `agora` → mesmo relatório (mesmo hash)."""
     hash_entradas = hash_das_entradas(agora=agora, politica=politica, execucoes=execucoes, externos=externos,
-                                      movimentacoes=movimentacoes, saldos=saldos, coberturas=coberturas, vinculos=vinculos)
+                                      movimentacoes=movimentacoes, saldos=saldos, coberturas=coberturas,
+                                      coberturas_execucoes=coberturas_execucoes, vinculos=vinculos)
     # só existe o que já tinha chegado em `agora`
     execucoes_v = [e for e in execucoes if e.confirmada_em <= agora]
     externos_v = [r for r in externos if r.recebido_em <= agora]
     vinculos_v = [v for v in vinculos if v.em <= agora]
+    coberturas_v = [c for c in coberturas_execucoes if c.consultada_em <= agora]
 
     unicas, duplicadas, conflitantes_int = _unicas(execucoes_v)
     atual, conflitantes_ext, corrigidas = _historia_externa(externos_v)
-    ctx = _Contexto(politica=politica, agora=agora, atual=atual, conflitantes=conflitantes_ext, corrigidas=corrigidas)
+    ctx = _Contexto(politica=politica, agora=agora, coberturas=coberturas_v, atual=atual, conflitantes=conflitantes_ext, corrigidas=corrigidas)
 
     refs_por_exec = {id_: _referencias(e, vinculos_v) for id_, e in unicas.items()}
     validos = set(unicas) - conflitantes_int
@@ -403,12 +459,15 @@ def conciliar(
     _revisar_estornos(resultados, unicas, refs_por_exec, ctx)
 
     orfaos = tuple(
-        ResultadoExterno(fonte_id=c[0], id_externo=c[1], versao=r.versao, ativo_id=r.ativo_id, lado=r.lado, quantidade=r.quantidade, executado_em=r.executado_em)
+        ResultadoExterno(
+            fonte_id=c[0], id_externo=c[1], versao=r.versao, ativo_id=r.ativo_id, lado=r.lado, quantidade=r.quantidade, preco=r.preco,
+            moeda_cotacao_id=r.moeda_cotacao_id, taxas=r.taxas, mercado_id=r.mercado_id, conta_id=r.conta_id, origem=r.origem,
+            status=r.status, executado_em=r.executado_em, recebido_em=r.recebido_em, estorna_id_externo=r.estorna_id_externo)
         for c, r in sorted(atual.items())
         if c not in ctx.reivindicadas and r.status is not StatusRegistroExterno.CANCELADO
     )
     lista = tuple(resultados[i] for i in sorted(resultados))
-    progresso = _progresso(lista, unicas, orfaos, politica)
+    progresso = _progresso(lista, unicas)
     saldos_resultado = conciliar_saldos(
         [s for s in saldos if s.recebido_em <= agora], [m for m in movimentacoes if m.recebido_em <= agora],
         coberturas, atual, politica,
