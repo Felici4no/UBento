@@ -3,10 +3,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from ubento.store import Store
+from ubento.workspace import Workspace
 from ubento.ui import theme
 from ubento.ui.main_window import MainWindow
 
@@ -33,7 +34,7 @@ def main() -> int:
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))
 
-    window = MainWindow(Store())
+    window = MainWindow(Workspace(QSettings(APP_NAME, APP_NAME)))
     window.show()
     return app.exec()
 

@@ -85,15 +85,16 @@ def make_quote(send: str, receive: str, amount: float) -> Quote:
 class Store(QObject):
     changed = Signal()
 
-    def __init__(self, now: datetime | None = None) -> None:
+    def __init__(self, now: datetime | None = None, seed: str = "main", scale: float = 1.0) -> None:
         super().__init__()
         self.now = now or datetime.now()
-        self.holdings: dict[str, float] = {
-            "USD": 6900.00, "ETH": 2.9934, "SOL": 6.5, "AVAX": 14.0,
-            "BNB": 0.45, "USDT": 881.0, "USDC": 364.12,
-        }
-        self.spent = 1144.0
-        self.income = 3226.0
+        self.seed = seed
+        self.readonly = False  # o agregado "Geral" é só leitura
+        self._parts: list[Store] = []
+        base = {"USD": 6900.00, "ETH": 2.9934, "SOL": 6.5, "AVAX": 14.0, "BNB": 0.45, "USDT": 881.0, "USDC": 364.12}
+        self.holdings: dict[str, float] = {k: round(v * scale, 8) for k, v in base.items()}
+        self.spent = 1144.0 * scale
+        self.income = 3226.0 * scale
         self.crypto_change = 1.7
         self.activity = self._make_activity()
         n = self.now
@@ -106,6 +107,36 @@ class Store(QObject):
             Transfer("sent", "Enviado SOL", "Para 5Qm2xK…r8TdP", "- 2,0000 SOL", n - timedelta(days=5)),
             Transfer("swap", "ETH para USD", "KD90ZA771QX0248815", "+ 1.204,10 USD", n - timedelta(days=8)),
         ]
+
+    # -- agregação (aba "Geral") ---------------------------------------------
+
+    @classmethod
+    def combined(cls, parts: list[Store], now: datetime | None = None) -> Store:
+        store = cls(now=now, seed="geral")
+        store.readonly = True
+        store.set_parts(parts)
+        return store
+
+    def set_parts(self, parts: list[Store]) -> None:
+        for old in self._parts:
+            old.changed.disconnect(self._sync)
+        self._parts = list(parts)
+        for part in self._parts:
+            part.changed.connect(self._sync)
+        self._sync()
+
+    def _sync(self) -> None:
+        parts = self._parts
+        self.holdings = {sym: round(sum(p.holdings.get(sym, 0.0) for p in parts), 8) for sym in ASSETS}
+        self.spent = sum(p.spent for p in parts)
+        self.income = sum(p.income for p in parts)
+        self.crypto_change = sum(p.crypto_change for p in parts) / len(parts) if parts else 0.0
+        self.activity = {}
+        for p in parts:
+            for day, count in p.activity.items():
+                self.activity[day] = self.activity.get(day, 0) + count
+        self.transfers = sorted((t for p in parts for t in p.transfers), key=lambda t: t.moment, reverse=True)
+        self.changed.emit()
 
     # -- patrimônio --------------------------------------------------------
 
@@ -126,7 +157,7 @@ class Store(QObject):
         count, step, target = RANGES[range_key]
         drift = math.log(1 + target) / (count - 1)
         sigma = 1.1 * drift + 0.003
-        rng = random.Random(f"ubento-{range_key}")
+        rng = random.Random(f"ubento-{self.seed}-{range_key}")
         values = [self.total_usd()]
         for _ in range(count - 1):
             r = max(-0.4, rng.gauss(drift, sigma))
@@ -136,7 +167,7 @@ class Store(QObject):
         return [(today - timedelta(days=step * (count - 1 - i)), v) for i, v in enumerate(values)]
 
     def usdc_series(self) -> list[float]:
-        rng = random.Random("ubento-usdc")
+        rng = random.Random(f"ubento-{self.seed}-usdc")
         n = 44
         raw = [rng.gauss(0, 0.0012) for _ in range(n)]
         for i in range(1, n):  # passeio com leve reversão
@@ -149,7 +180,7 @@ class Store(QObject):
 
     def _make_activity(self) -> dict[date, int]:
         today = self.now.date()
-        rng = random.Random(f"ubento-{today.year}-{today.month}")
+        rng = random.Random(f"ubento-{self.seed}-{today.year}-{today.month}")
         return {date(today.year, today.month, d): rng.choice([0, 0, 1, 2, 3, 4, 6, 8]) for d in range(1, today.day + 1)}
 
     def transfers_count(self) -> int:
@@ -173,6 +204,8 @@ class Store(QObject):
 
     def validate(self, send: str, receive: str, amount: float) -> str | None:
         """Devolve o motivo de a troca não poder acontecer, ou None se está ok."""
+        if self.readonly:
+            return "Escolha um agente para fazer swap"
         if send == receive:
             return "Escolha moedas diferentes"
         if amount <= 0:

@@ -45,6 +45,12 @@ QMenu {{
 QMenu::item {{ padding: 8px 20px 8px 14px; border-radius: 8px; font-size: 14px; }}
 QMenu::item:selected {{ background: #25252C; }}
 QScrollArea {{ background: transparent; }}
+QDialog, QMessageBox, QInputDialog {{ background: #141418; }}
+QDialog QLabel {{ color: {TEXT}; font-size: 14px; }}
+QDialog QLineEdit {{ background: #0F0F13; color: {TEXT}; border: 1px solid #2A2A31; border-radius: 10px; padding: 8px 10px; font-size: 15px; selection-background-color: {BLUE}; }}
+QDialog QPushButton {{ background: #1E1E25; color: {TEXT}; border: 1px solid #2E2E36; border-radius: 10px; padding: 8px 18px; font-size: 14px; min-width: 70px; }}
+QDialog QPushButton:hover {{ background: #26262E; }}
+QDialog QPushButton:default {{ background: {BLUE}; border-color: {BLUE}; }}
 QScrollBar:vertical {{ background: transparent; width: 12px; margin: 4px 2px; }}
 QScrollBar::handle:vertical {{ background: #2E2E36; border-radius: 4px; min-height: 40px; }}
 QScrollBar::handle:vertical:hover {{ background: #3D3D47; }}

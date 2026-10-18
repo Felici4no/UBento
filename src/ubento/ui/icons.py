@@ -41,7 +41,8 @@ _BODIES = {
     "arrow-up": '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>',
     "arrow-down": '<path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/>',
     "swap": '<path d="M7 20V4"/><path d="M3 8l4-4 4 4"/><path d="M17 4v16"/><path d="M13 16l4 4 4-4"/>',
-    "plus": '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    "grid": '<rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/>',
+    "plus":'<path d="M12 5v14"/><path d="M5 12h14"/>',
     "check-circle": '<circle cx="12" cy="12" r="10"/><path d="M8 12.5l3 3 5-6"/>',
     "alert": '<circle cx="12" cy="12" r="10"/><path d="M12 7v6"/><path d="M12 16.5v.5"/>',
 }
