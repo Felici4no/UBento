@@ -11,6 +11,7 @@ Só o cursor de reprodução (`cursor`) é mutável: não é fato do domínio, s
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -24,6 +25,8 @@ from ..nucleo.conciliacao.eventos import EventoConciliacao
 from ..nucleo.esquema import Ativacao, Avaliacao, Evento, Meta, Modelo
 
 M = TypeVar("M", bound=Modelo)
+
+log = logging.getLogger("ubento.persistencia")
 
 APPEND_ONLY = ("metas", "eventos", "razao", "avaliacoes", "entradas")
 
@@ -73,6 +76,20 @@ class ErroDeContrato(ErroDePersistencia):
     pass
 
 
+class ErroBancoOcupado(ErroDePersistencia):
+    """Outra escrita segurou o banco por mais tempo que o limite de espera. NADA foi gravado (a transação inteira foi desfeita)."""
+
+    MENSAGEM = "O banco de dados está ocupado por outra operação de escrita e a espera acabou. Nada foi gravado. Tente novamente em instantes."
+
+
+def _traduzir(erro: sqlite3.OperationalError) -> Exception:
+    """Timeout de escrita vira uma mensagem compreensível; o erro técnico original fica no log (e na cadeia `__cause__`)."""
+    if "locked" in str(erro).lower() or "busy" in str(erro).lower():
+        log.error("timeout de escrita no SQLite (sem gravação parcial): %s", erro, exc_info=erro)
+        return ErroBancoOcupado(ErroBancoOcupado.MENSAGEM)
+    return erro
+
+
 def _gatilhos() -> str:
     partes = []
     for t in APPEND_ONLY:
@@ -84,19 +101,19 @@ def _gatilhos() -> str:
 class Repositorio:
     """`somente_leitura=True` abre o banco existente em modo `ro` com `query_only`: nenhuma escrita é possível (nem criar tabelas)."""
 
-    def __init__(self, caminho: str | Path = ":memory:", somente_leitura: bool = False):
+    def __init__(self, caminho: str | Path = ":memory:", somente_leitura: bool = False, timeout: float = 10.0):
         self.caminho = str(caminho)
         self.somente_leitura = somente_leitura
         if somente_leitura:
             if self.caminho == ":memory:" or not Path(self.caminho).exists():
                 raise ErroDePersistencia(f"banco inexistente (somente leitura não cria nada): {self.caminho}")
-            self.con = sqlite3.connect(Path(self.caminho).resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+            self.con = sqlite3.connect(Path(self.caminho).resolve().as_uri() + "?mode=ro", uri=True, timeout=timeout)
             self.con.row_factory = sqlite3.Row
             self.con.execute("PRAGMA query_only = ON")
             return
         if self.caminho != ":memory:":
             Path(self.caminho).parent.mkdir(parents=True, exist_ok=True)
-        self.con = sqlite3.connect(self.caminho, timeout=10)
+        self.con = sqlite3.connect(self.caminho, timeout=timeout)
         self.con.row_factory = sqlite3.Row
         self.con.execute("PRAGMA foreign_keys = ON")
         if self.caminho != ":memory:":
@@ -107,19 +124,31 @@ class Repositorio:
         self.con.close()
 
     @contextmanager
-    def _tx(self, imediata: bool = False):
-        """Transação com commit/rollback. Aninhada, ela se junta à transação já aberta (quem abriu é quem fecha)."""
+    def _tx(self, imediata: bool = True):
+        """Transação com commit/rollback. Aninhada, ela se junta à transação já aberta (quem abriu é quem fecha).
+        Toda escrita é IMMEDIATE: o direito de escrever é tomado no início (nunca uma promoção que falha no meio).
+        Timeout de escrita → `ErroBancoOcupado`, com a transação inteira desfeita."""
         if self.con.in_transaction:
             yield
             return
-        self.con.execute("BEGIN IMMEDIATE" if imediata else "BEGIN")
+        try:
+            self.con.execute("BEGIN IMMEDIATE" if imediata else "BEGIN")
+        except sqlite3.OperationalError as erro:
+            raise _traduzir(erro) from erro
         try:
             yield
+        except sqlite3.OperationalError as erro:
+            self.con.rollback()
+            raise _traduzir(erro) from erro
         except BaseException:
             self.con.rollback()
             raise
         else:
-            self.con.commit()
+            try:
+                self.con.commit()
+            except sqlite3.OperationalError as erro:
+                self.con.rollback()
+                raise _traduzir(erro) from erro
 
     def escrita(self):
         """Seção de escrita EXCLUSIVA: `BEGIN IMMEDIATE` toma o direito de escrever já no início, então "verificar e gravar" é atômico

@@ -93,36 +93,61 @@ class ConsultaMetas:
             ),
         }
 
+    @staticmethod
+    def _aviso_de_atualidade(avaliada_em: datetime | None, desatualizada: bool | None) -> str:
+        if avaliada_em is None:
+            return "A meta ainda não tem avaliação gravada: não há estado persistido para informar."
+        quando = f"{avaliada_em:%d/%m/%Y %H:%M} UTC"
+        texto = (f"Estes dados refletem a última avaliação gravada, feita em {quando}. Não são atualizados em tempo real: "
+                 "o que mudou depois dela só aparece quando o app reavaliar a meta.")
+        if desatualizada:
+            texto += " Há entradas mais novas que essa avaliação (veja cobertura_da_evidencia.posterior_a_ultima_avaliacao)."
+        return texto
+
     def _envelope(self, meta_id: str, dados: dict) -> dict:
         ultima = self._ultima(meta_id)
+        cobertura = self._cobertura(meta_id)
         return {
             "meta_id": meta_id,
             "consulta": {"somente_leitura": True, "recalculou": False, "gravou": False, "versao_do_app": __version__,
                          "base": "estado persistido no banco; nada é recalculado ao consultar"},
             "estado_persistido": ultima[0].estado.value if ultima else None,
             "ultima_avaliacao": self._ultima_avaliacao(meta_id),
-            "cobertura_da_evidencia": self._cobertura(meta_id),
+            "leitura": {"tempo_real": False, "aviso": self._aviso_de_atualidade(ultima[0].avaliada_em if ultima else None, cobertura["desatualizada"])},
+            "cobertura_da_evidencia": cobertura,
             "dados": dados,
         }
 
     # -- consultas ------------------------------------------------------------------------------------------------------
 
-    def listar_metas(self, agente_id: str | None = None) -> dict:
+    def listar_metas(self, agente_id: str | None = None, somente_com_pendencias: bool = False) -> dict:
         itens = []
         for meta_id in self._servico.metas(agente_id):
             painel = self._servico.painel(meta_id)
             p = painel.progresso
-            itens.append({
+            cobertura = self._cobertura(meta_id)
+            relevantes = [o for o in p.orfaos if o.relevante] if p else []
+            pendentes = sum(1 for r in painel.execucoes if r.situacao == "pendente_de_comprovacao")
+            abertas = (len(p.completude.pendencias) + len(relevantes)) if p else None
+            item = {
                 "meta_id": meta_id, "descricao": painel.descricao, "agente_id": painel.agente_id, "ativo_id": painel.ativo_id,
                 "estado_persistido": painel.estado.value if painel.estado else None,
                 "ultima_avaliacao_em": jsonavel(painel.avaliacao.avaliada_em) if painel.avaliacao else None,
                 "quantidade_alvo": jsonavel(p.quantidade_alvo) if p else None,
                 "quantidade_comprovada": jsonavel(p.quantidade_comprovada) if p else None,
                 "execucoes_registradas": len(painel.execucoes),
-                "evidencia_desatualizada": self._cobertura(meta_id)["desatualizada"],
-            })
+                "execucoes_pendentes_de_comprovacao": pendentes,
+                "pendencias_abertas": abertas,
+                "tem_pendencia": None if p is None else (not p.completude.completa) or pendentes > 0 or bool(relevantes),
+                "evidencia_desatualizada": cobertura["desatualizada"],
+                "aviso": self._aviso_de_atualidade(painel.avaliacao.avaliada_em if painel.avaliacao else None, cobertura["desatualizada"]),
+            }
+            if not somente_com_pendencias or item["tem_pendencia"]:
+                itens.append(item)
         return {
             "consulta": {"somente_leitura": True, "recalculou": False, "gravou": False, "base": "estado persistido no banco"},
+            "leitura": {"tempo_real": False, "aviso": "Cada meta mostra o estado da sua última avaliação gravada (ultima_avaliacao_em); nada aqui é atualizado em tempo real."},
+            "filtro": {"agente_id": agente_id, "somente_com_pendencias": somente_com_pendencias},
             "total": len(itens), "metas": itens,
         }
 

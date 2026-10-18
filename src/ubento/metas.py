@@ -22,7 +22,7 @@ from .nucleo.conciliacao.modelos import (
 from .nucleo.conciliacao.conciliador import id_do_vinculo
 from .nucleo.esquema import Avaliacao, EstadoMeta, Evento, Execucao, LadoExecucao, Meta, Modelo, Observacao
 from .nucleo.regras import Snapshot
-from .persistencia import Repositorio
+from .persistencia import ErroBancoOcupado, Repositorio
 
 
 class ErroDeRegistro(ValueError):
@@ -91,8 +91,11 @@ def _exclusivo(metodo):
 
     @functools.wraps(metodo)
     def interno(self, *args, **kwargs):
-        with self.repo.escrita():
-            return metodo(self, *args, **kwargs)
+        try:
+            with self.repo.escrita():
+                return metodo(self, *args, **kwargs)
+        except ErroBancoOcupado as erro:  # nada foi gravado; a mensagem é compreensível e o erro técnico já está no log
+            raise ErroDeRegistro(str(erro)) from erro
 
     return interno
 
