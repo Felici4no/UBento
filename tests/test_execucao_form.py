@@ -152,3 +152,20 @@ def test_formulario_mostra_unidades_moeda_e_horario(app, tmp_path):
     assert "3.98" in dialogo.liquida.text()  # líquida calculada pelo sistema, nunca digitada
     janela.close()
     janela.metas.repo.fechar()
+
+
+def test_erro_marca_o_campo_e_o_formulario_rola_em_janela_pequena(app, tmp_path):
+    janela, agente = _abrir(app, tmp_path / "y.db")
+    janela.open_metas(agente)
+    page = janela.pages["metas:" + agente].widget()
+    page.importar_arquivo(str(CENARIO))
+    dialogo = page.criar_formulario()
+    dialogo.resize(520, 400)  # pequeno: só a área dos campos rola; erros e botões continuam à vista
+    dialogo.definir(quantidade_bruta="abc")
+    assert dialogo.salvar() is False
+    assert dialogo.campos["quantidade_bruta"].property("erro") is True
+    dialogo.definir(quantidade_bruta="4")  # corrigir o campo tira a marca
+    assert not dialogo.campos["quantidade_bruta"].property("erro")
+    assert dialogo.rolagem.widget().sizeHint().height() > dialogo.rolagem.viewport().height()
+    janela.close()
+    janela.metas.repo.fechar()

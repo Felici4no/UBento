@@ -1,7 +1,8 @@
 """Formulário de registro de execução de uma meta.
 
 Registrar é uma confirmação INTERNA: a execução fica "pendente de comprovação" até existir registro externo correspondente.
-Erros aparecem dentro do formulário e nada do que foi digitado se perde. Todas as regras vêm do núcleo/serviço.
+Erros aparecem dentro do formulário, o campo com problema é marcado e nada do que foi digitado se perde.
+Todas as regras vêm do núcleo/serviço. Só a área dos campos rola: título, erros e botões ficam sempre visíveis.
 """
 
 from __future__ import annotations
@@ -11,7 +12,9 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout
+from PySide6.QtWidgets import (
+    QComboBox, QDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
+)
 from pydantic import ValidationError
 
 from ..metas import ErroDeRegistro, PainelMeta
@@ -26,11 +29,21 @@ ROTULOS = {
     "preco_executado": "Preço executado", "taxa_na_cotacao": "Taxa na moeda de cotação", "custo_fixo_real": "Custo fixo", "executada_em": "Executada em",
     "confirmada_em": "Confirmada em", "fonte_id": "Fonte do registro", "estorna_execucao_id": "Estorna a execução", "referencias_externas": "Registro externo",
 }
+CHAVE_POR_ROTULO = {rotulo: chave for chave, rotulo in ROTULOS.items()}
+REFERENCIA = ("ref_fonte", "ref_id")
+# campo do núcleo -> campos do formulário que o usuário deve olhar
+CAMPOS_DO_ERRO = {"quantidade_liquida": ("quantidade_bruta", "taxa_no_ativo"), "referencias_externas": REFERENCIA, "estorna_execucao_id": ("lado",)}
 FORMATO_HORA = "%Y-%m-%d %H:%M"
 
 
 class ErroDeFormulario(ValueError):
-    pass
+    def __init__(self, mensagem: str, chaves: tuple[str, ...] = ()):
+        super().__init__(mensagem)
+        self.chaves = chaves
+
+
+def _erro(campo: str, mensagem: str) -> ErroDeFormulario:
+    return ErroDeFormulario(f"{campo}: {mensagem}", tuple(k for k in (CHAVE_POR_ROTULO.get(campo),) if k))
 
 
 def decimal(texto: str, campo: str, *, obrigatorio=True) -> str:
@@ -38,16 +51,16 @@ def decimal(texto: str, campo: str, *, obrigatorio=True) -> str:
     limpo = texto.strip().replace(",", ".")
     if not limpo:
         if obrigatorio:
-            raise ErroDeFormulario(f"{campo}: informe um valor")
+            raise _erro(campo, "informe um valor")
         return "0"
     if "e" in limpo.lower():
-        raise ErroDeFormulario(f"{campo}: use número simples, sem notação científica")
+        raise _erro(campo, "use número simples, sem notação científica")
     try:
         valor = Decimal(limpo)
     except InvalidOperation as erro:
-        raise ErroDeFormulario(f"{campo}: “{texto.strip()}” não é um número") from erro
+        raise _erro(campo, f"“{texto.strip()}” não é um número") from erro
     if not valor.is_finite():
-        raise ErroDeFormulario(f"{campo}: valor inválido")
+        raise _erro(campo, "valor inválido")
     return limpo
 
 
@@ -55,7 +68,7 @@ def instante(texto: str, campo: str) -> str:
     try:
         return datetime.strptime(texto.strip(), FORMATO_HORA).strftime("%Y-%m-%dT%H:%M:00Z")
     except ValueError as erro:
-        raise ErroDeFormulario(f"{campo}: use AAAA-MM-DD HH:MM (horário UTC)") from erro
+        raise _erro(campo, "use AAAA-MM-DD HH:MM (horário UTC)") from erro
 
 
 def mensagens(erro: ValidationError) -> list[str]:
@@ -75,9 +88,10 @@ class ExecucaoDialog(QDialog):
         self.salvou = self.nova = False
         ativo, moeda = painel.ativo_id, painel.moeda_cotacao_id
         self.setWindowTitle("Registrar execução")
-        self.setMinimumWidth(560)
+        self.setMinimumSize(520, 360)
         self.setStyleSheet(
             f"QDialog {{ background: {theme.BG_BOTTOM}; }} QLabel {{ color: {theme.TEXT}; }}"
+            f"QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}"
             f"QLineEdit, QComboBox {{ background: {theme.PANEL}; color: {theme.TEXT}; border: 1px solid {theme.PANEL_EDGE};"
             f" border-radius: 10px; padding: 7px 10px; font-size: 14px; }} QLineEdit:focus {{ border-color: {theme.BLUE}; }}"
             f"QComboBox QAbstractItemView {{ background: {theme.PANEL}; color: {theme.TEXT}; }}"
@@ -158,15 +172,29 @@ class ExecucaoDialog(QDialog):
         botoes.addWidget(cancelar)
         botoes.addWidget(self.salvar_btn)
 
+        corpo = QWidget()
+        corpo_layout = QVBoxLayout(corpo)
+        corpo_layout.setContentsMargins(0, 0, 8, 0)
+        corpo_layout.setSpacing(12)
+        corpo_layout.addLayout(form)
+        corpo_layout.addWidget(aviso)
+        self.rolagem = QScrollArea()
+        self.rolagem.setWidgetResizable(True)
+        self.rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        self.rolagem.setWidget(corpo)
+
         v = QVBoxLayout(self)
-        v.setContentsMargins(24, 20, 24, 20)
+        v.setContentsMargins(24, 20, 16, 20)
         v.setSpacing(12)
         v.addWidget(Label("Registrar execução", 22, W.DemiBold))
-        v.addLayout(form)
-        v.addWidget(aviso)
+        v.addWidget(self.rolagem, 1)
         v.addWidget(self.erros)
         v.addLayout(botoes)
         self._atualizar_lado()
+        for nome, edicao in self.campos.items():
+            edicao.textChanged.connect(lambda _t, n=nome: self._limpar(n))
+        tela = self.screen().availableGeometry().height() if self.screen() else 800
+        self.resize(600, max(360, min(corpo.sizeHint().height() + 190, int(tela * 0.85))))
 
     # -- comportamento -------------------------------------------------------------------------------------------------
 
@@ -195,7 +223,7 @@ class ExecucaoDialog(QDialog):
         liquida = format(Decimal(bruta) - Decimal(taxa), "f")
         estorno = self.lado.currentData() == LadoExecucao.ESTORNO_COMPRA.value
         if bool(c["ref_fonte"].strip()) != bool(c["ref_id"].strip()):
-            raise ErroDeFormulario("Registro externo: informe a fonte E o id (ou deixe os dois vazios)")
+            raise ErroDeFormulario("Registro externo: informe a fonte E o id (ou deixe os dois vazios)", REFERENCIA)
         dados = {
             "id": c["id"].strip(), "meta_id": self.painel.meta_id, "ativo_id": self.painel.ativo_id, "lado": self.lado.currentData(),
             "quantidade_bruta": bruta, "taxa_no_ativo": taxa, "quantidade_liquida": liquida,
@@ -211,22 +239,43 @@ class ExecucaoDialog(QDialog):
         return Execucao.model_validate(dados)
 
     def salvar(self) -> bool:
-        """Valida e grava. Em qualquer erro o formulário continua aberto com tudo preenchido."""
+        """Valida e grava. Em qualquer erro o formulário continua aberto, com tudo preenchido e o campo com problema marcado."""
+        self._limpar()
         try:
             execucao = self.montar()
             gravou = self.ao_salvar(execucao)
         except ErroDeFormulario as erro:
-            return self._mostrar([str(erro)])
+            return self._mostrar([str(erro)], erro.chaves)
         except ValidationError as erro:
-            return self._mostrar(mensagens(erro))
+            chaves = tuple(k for e in erro.errors() if e["loc"] for k in CAMPOS_DO_ERRO.get(str(e["loc"][0]), (str(e["loc"][0]),)))
+            return self._mostrar(mensagens(erro), chaves)
         except ErroDeRegistro as erro:
-            return self._mostrar([str(erro)])
+            texto = str(erro).lower()
+            chaves = ("id",) if "identificador" in texto else REFERENCIA if "registro externo" in texto else ("lado",) if "estorno" in texto else ()
+            return self._mostrar([str(erro)], chaves)
         self.erros.hide()
         self.salvou, self.nova = True, gravou
         self.accept()
         return True
 
-    def _mostrar(self, linhas: list[str]) -> bool:
+    def _widget(self, chave: str):
+        return self.lado if chave == "lado" else self.campos.get(chave)
+
+    def _limpar(self, chave: str | None = None) -> None:
+        """Tira a marca de erro (de um campo, ou de todos)."""
+        for nome in [chave] if chave else [*self.campos, "lado"]:
+            w = self._widget(nome)
+            if w is not None and w.property("erro"):
+                w.setProperty("erro", False)
+                w.setStyleSheet("")
+
+    def _mostrar(self, linhas: list[str], chaves: tuple[str, ...] = ()) -> bool:
         self.erros.setText("\n".join(f"• {m}" for m in linhas))
         self.erros.show()
+        alvos = [w for w in (self._widget(c) for c in chaves) if w is not None]
+        for w in alvos:
+            w.setProperty("erro", True)
+            w.setStyleSheet(f"border: 1px solid {theme.RED}; border-radius: 10px; padding: 7px 10px; background: {theme.PANEL}; color: {theme.TEXT};")
+        if alvos:
+            self.rolagem.ensureWidgetVisible(alvos[0], 0, 40)  # leva o primeiro campo com erro para a vista
         return False

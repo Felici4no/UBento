@@ -38,8 +38,18 @@ def num(valor: Decimal) -> str:
     return texto if "." not in texto else texto.rstrip("0").rstrip(".")
 
 
+# os identificadores do domínio não têm acento; na tela eles voltam a ser português
+ACENTOS = {
+    "nao": "não", "execucao": "execução", "execucoes": "execuções", "pendencia": "pendência", "conciliacao": "conciliação",
+    "conciliada": "conciliada", "avaliacao": "avaliação", "invalidacao": "invalidação", "evidencia": "evidência", "orcamento": "orçamento",
+    "possivel": "possível", "verificavel": "verificável", "indeterminado": "indeterminado", "ate": "até", "registro": "registro",
+    "reducao": "redução", "excecao": "exceção", "divergencia": "divergência", "revisao": "revisão", "movimentacao": "movimentação",
+    "reconciliada": "reconciliada", "bloqueio": "bloqueio", "cotacao": "cotação", "periodo": "período", "ja": "já",
+}
+
+
 def legivel(identificador: str) -> str:
-    return identificador.replace("_", " ")
+    return " ".join(ACENTOS.get(parte, parte) for parte in identificador.split("_"))
 
 
 def exemplos_dir() -> Path | None:
