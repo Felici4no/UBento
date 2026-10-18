@@ -1,0 +1,91 @@
+# Exemplo fictício. Todos os números e fontes são SIMULADOS e servem só para ilustrar o contrato.
+id: analise-tokx-001
+versao: 1
+escopo:
+  ativos: [tokx]
+  moeda_referencia: usd
+  mercados: [bolsa-a]
+  horizonte_dias: 90
+  pergunta: "O preço de TOKX permite acumular 100 unidades com 1000 USD em 90 dias?"
+observacoes:
+  - id: obs-preco-001
+    ativo_id: tokx
+    metrica_id: preco_ultima_negociacao
+    fonte_id: fonte-simulada-a
+    mercado_id: bolsa-a
+    unidade: USD
+    valor: "10.2500"
+    qualidade: disponivel
+    origem: simulado
+    observado_em: "2026-10-18T12:00:00Z"
+    coletado_em: "2026-10-18T12:00:05Z"
+  - id: obs-preco-002
+    ativo_id: tokx
+    metrica_id: preco_ultima_negociacao
+    fonte_id: fonte-simulada-a
+    mercado_id: bolsa-a
+    unidade: USD
+    valor: "10.7900"
+    qualidade: disponivel
+    origem: simulado
+    observado_em: "2026-09-18T12:00:00Z"
+    coletado_em: "2026-09-18T12:00:05Z"
+  - id: obs-livro-001
+    ativo_id: tokx
+    metrica_id: profundidade_livro
+    fonte_id: fonte-simulada-a
+    mercado_id: bolsa-a
+    unidade: TOKX
+    valor: null
+    qualidade: ausente
+    origem: simulado
+    motivo_ausencia: "A fonte simulada não fornece profundidade de livro."
+    observado_em: "2026-10-18T12:00:00Z"
+    coletado_em: "2026-10-18T12:00:05Z"
+indicadores:
+  - id: ind-retorno-30d
+    metrica_id: retorno_30d
+    formula_id: retorno@1
+    entradas: [obs-preco-002, obs-preco-001]
+    resultado: "-0.05"
+    unidade: razao
+evidencias:
+  - id: ev-doc-001
+    relacao: contexto
+    descricao: "Documento de referência (simulado) descrevendo o calendário de emissão do token."
+    referencia: "documento-simulado-001"
+    coletada_em: "2026-10-18T12:30:00Z"
+afirmacoes:
+  - id: af-001
+    tipo: fato
+    texto: "A última negociação em bolsa-a ocorreu a 10,25 USD."
+    referencias: [obs-preco-001]
+  - id: af-002
+    tipo: calculo
+    texto: "O preço caiu cerca de 5% em 30 dias."
+    referencias: [ind-retorno-30d]
+  - id: af-003
+    tipo: hipotese
+    texto: "Uma queda adicional até 9,90 USD é possível dentro do horizonte, mas não há evidência de que ocorrerá."
+cenarios:
+  - id: cen-adverso
+    nome: adverso
+    horizonte_dias: 90
+    premissas: ["O preço permanece acima de 10,50 USD até o prazo."]
+    resultados:
+      - { metrica_id: quantidade_acumulada, valor: "0", unidade: TOKX }
+  - id: cen-referencia
+    nome: referencia
+    horizonte_dias: 90
+    premissas: ["O preço oscila e cruza 9,90 USD uma vez."]
+    custos: "5"
+    resultados:
+      - { metrica_id: quantidade_acumulada, valor: "100", unidade: TOKX }
+lacunas:
+  - "Sem dados de profundidade de livro: liquidez não verificada."
+conclusao:
+  resultado: inconclusivo
+  escopo_texto: "Apenas bolsa-a, horizonte de 90 dias, referência em USD."
+  justificativa: "Os dados disponíveis não sustentam nem contradizem o alvo; liquidez desconhecida."
+  autor: "Analista de exemplo"
+publicada_em: "2026-10-18T13:00:00Z"

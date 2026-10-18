@@ -1,0 +1,90 @@
+"""Gera exemplos/nucleo/meta_exemplo.yaml com o hash real da análise de exemplo.
+
+    python scripts/gerar_exemplo_meta.py
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RAIZ / "src"))
+
+from ubento.nucleo.canonico import hash_documento  # noqa: E402
+from ubento.nucleo.carregador import carregar_arquivo  # noqa: E402
+from ubento.nucleo.esquema import Analise  # noqa: E402
+
+MODELO = """\
+# Exemplo fictício de contrato de meta (termos congelados). Valores SIMULADOS.
+id: meta-tokx-001
+criada_em: "2026-10-18T13:30:00-03:00"
+analise_id: analise-tokx-001
+analise_versao: 1
+analise_hash: "__HASH__"
+objetivo:
+  tipo: acumular_quantidade
+  ativo_id: tokx
+  moeda_cotacao_id: usd
+  quantidade_alvo: "100"
+  prazo: "2027-01-16T23:59:59Z"
+mercado:
+  mercado_id: bolsa-a
+  incremento_preco: "0.0001"
+  incremento_quantidade: "0.01"
+custos:
+  custo_fixo: "5"
+  taxa_proporcional: "0.005"
+  tratamento_taxa: cobrada_na_cotacao
+recursos:
+  orcamento: "1000"
+  moeda_orcamento_id: usd
+  saldo_reservado: "1000"
+  exposicao_maxima: "0.25"
+regras:
+  bloqueios:
+    - id: bq-liquidez
+      op: gte
+      esquerda: { tipo: metrica, metrica_id: profundidade_livro, ativo_id: tokx, mercado_id: bolsa-a }
+      direita: { tipo: valor, valor: "100", unidade: TOKX }
+  entrada:
+    - id: en-preco
+      op: lte
+      esquerda: { tipo: metrica, metrica_id: preco_executavel, ativo_id: tokx, mercado_id: bolsa-a }
+      direita: { tipo: valor, valor: "9.9004", unidade: USD }
+  invalidacao:
+    - id: inv-queda
+      op: lt
+      esquerda: { tipo: metrica, metrica_id: retorno_7d, ativo_id: tokx, mercado_id: bolsa-a, janela_segundos: 604800 }
+      direita: { tipo: valor, valor: "-0.30", unidade: razao }
+politicas:
+  carencia_dados_segundos: 86400
+  validades:
+    - { metrica_id: preco_executavel, validade_maxima_segundos: 60 }
+  tolerancias:
+    - { metrica_id: preco_executavel, mercado_id: bolsa-a, diferenca_maxima_horario_segundos: 5, tolerancia_relativa: "0.005" }
+fundamentacao:
+  cenarios_origem: [cen-referencia]
+  justificativa: "A meta só é viável se o preço executável ficar em 9,9004 USD ou menos; a análise é inconclusiva sobre liquidez."
+  aprovacoes:
+    - pergunta: premissa-alvo
+      autor: "Pessoa de exemplo"
+      justificativa: "Aceito o risco de a meta expirar sem nenhuma compra."
+      analise_hash: "__HASH__"
+      em: "2026-10-18T13:20:00-03:00"
+reprodutibilidade:
+  versao_politica: politica-1
+  versao_catalogo: catalogo-1
+  versao_algoritmo: motor-0.2.0
+"""
+
+
+def main() -> None:
+    analise = carregar_arquivo(Analise, RAIZ / "exemplos" / "nucleo" / "analise_exemplo.yaml")
+    destino = RAIZ / "exemplos" / "nucleo" / "meta_exemplo.yaml"
+    destino.write_text(MODELO.replace("__HASH__", hash_documento(analise)), encoding="utf-8")
+    print("gerado", destino.name, hash_documento(analise)[:16])
+
+
+if __name__ == "__main__":
+    main()
