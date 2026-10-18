@@ -54,7 +54,7 @@ Ordem de aplicação, para cada execução interna:
 3. **Versões externas.** Registros com a mesma chave `(fonte_id, id_externo)` formam uma história. Vale a maior `versao`. Duas versões iguais com conteúdo idêntico são uma só; com conteúdo diferente, a chave é **conflitante** e quem a usa vai para `revisao`.
 4. **Identificador estável.** A correspondência é feita **somente** por `referencias_externas` (ou `VinculoManual`). Preço, horário e quantidade **nunca** criam um elo.
 5. **Sem referência.** A execução vai para `revisao` (`sem_identificador_externo`). O módulo pode listar **candidatos** (mesmo ativo e lado, quantidade e horário dentro da política) apenas como sugestão para a pessoa; eles não viram elo e não contam.
-6. **Referência sem registro.** Dentro de `janela_atraso_segundos` após `confirmada_em`: `pendente` (dado pode estar atrasado). Depois disso: `sem_registro_externo`.
+6. **Referência sem registro.** Dentro de `janela_atraso_segundos` após `confirmada_em`: `pendente` (dado pode estar atrasado). Depois disso a ausência **só é prova** se uma `CoberturaExecucoes` da mesma fonte e ativo cobria o período da execução (± tolerância de horário) e a consulta foi feita depois de a fonte ter tido tempo de publicar: então `sem_registro_externo`. **Sem cobertura: `nao_verificavel`**, que não confirma nem desmente a execução. Idade da execução, validade do dado e cobertura da consulta são conceitos diferentes (ver `AVALIACAO_META.md` §2.1).
 7. **Estado do registro.** `pendente` → `pendente`. `cancelado` → `divergente` (`cancelado_externamente`); a execução só deixa de contar se houver estorno interno conciliado.
 8. **Alocação.** Para cada registro externo, a soma das quantidades alocadas por **todas** as execuções (de qualquer meta) não pode exceder a quantidade do registro. Excedeu: todas as execuções envolvidas vão para `revisao`. Usar o registro **inteiro** em duas execuções é o caso extremo e recebe o motivo específico `registro_externo_em_metas_diferentes` quando as metas diferem.
 9. **Comparação de campos** (seção 4) → `conciliada` ou `divergente`.
@@ -86,7 +86,8 @@ Cada diferença gera um item `(campo, valor interno, valor externo)` e um motivo
 | `conciliada` | Todos os registros existem, são únicos, confirmados e coincidem em todos os campos | **Sim** |
 | `divergente` | Há correspondência por ID, mas algum campo difere ou o registro foi cancelado | Não |
 | `pendente` | Falta registro ou ele ainda está `pendente`, dentro da janela de atraso | Não |
-| `sem_registro_externo` | Referência sem registro depois da janela de atraso | Não |
+| `sem_registro_externo` | Ausência **provada**: a consulta cobria o período e a janela de atraso passou | Não |
+| `nao_verificavel` | Ausência **não provada** (sem cobertura da consulta); se havia prova anterior, o avaliador a preserva | Não |
 | `revisao` | Correspondência ambígua, conflitante ou sem identificador; exige decisão humana | Não |
 
 Motivos (códigos estáveis): `aguardando_registro_externo`, `registro_externo_pendente`, `registro_externo_nao_encontrado`,
@@ -100,8 +101,9 @@ Motivos (códigos estáveis): `aguardando_registro_externo`, `registro_externo_p
 
 ### 5.2 Registro externo sem execução interna
 
-`orfao`: execução da fonte que ninguém referencia. **Nunca** vira progresso sozinha; pode ser uma compra não registrada e
-por padrão impede a confirmação (seção 6).
+`orfao`: execução da fonte que ninguém referencia. **Nunca** vira progresso sozinha. O relatório o lista com conta, mercado,
+origem, preço e taxas; **quem decide se ele bloqueia uma meta é o avaliador**, com critérios de escopo (ativo, mercado, moeda,
+origem, conta, vínculo e período; `AVALIACAO_META.md` §3). A conciliação, que não conhece o contrato, não bloqueia metas por órfão.
 
 ### 5.3 Por ativo e intervalo (saldos)
 
@@ -121,9 +123,10 @@ Por meta, no relatório:
 - `comprovado`: Σ da quantidade líquida das execuções `conciliada` (compra soma, estorno válido subtrai). **É o único valor que pode atingir o alvo.**
 - `declarado`: Σ do que está registrado internamente (informativo).
 - `nao_comprovado`: `declarado − comprovado`, com a contagem por resultado.
-- `custos`: por ativo, sem conversão entre ativos, só das execuções conciliadas.
+- `custos`: por ativo, sem conversão entre ativos, separados em **`verificado`** (taxas conferidas, só de execuções conciliadas) e **`nao_verificado`** (custo fixo e custos de execuções ainda não conciliadas).
+- `gasto`: na moeda de cotação, **`comprovado`** (valor pago e taxa na cotação conciliados, líquidos de estornos) e **`nao_comprovado`** (custo fixo e o que não foi conciliado, como limite superior).
 - `taxas_no_ativo`: total já descontado da quantidade.
-- `confirmacao` (também no relatório geral) fala **só de execuções**; saldos têm resultado próprio e não a alteram. Vale `confirmada` **somente** se todas as execuções da meta estão `conciliada` e (por padrão) não há órfão do mesmo ativo; senão `incompleta`, com a lista de pendências. **Conciliação incompleta nunca é apresentada como confirmada.**
+- `confirmacao` por meta fala **só das execuções da meta** (órfãos são avaliados com o escopo do contrato). No relatório geral, por política, qualquer órfão ainda a torna `incompleta`. Saldos têm resultado próprio e não a alteram. Vale `confirmada` **somente** se todas as execuções da meta estão `conciliada` e (por padrão) não há órfão do mesmo ativo; senão `incompleta`, com a lista de pendências. **Conciliação incompleta nunca é apresentada como confirmada.**
 
 O corte do prazo (D3) pertence ao avaliador: cada resultado traz `executada_em` para que ele considere só o que ocorreu até
 o prazo original.
@@ -144,12 +147,13 @@ o prazo original.
 
 - O relatório é **função pura** de `(registros, política, agora)`; `hash_entradas` e `hash_saida` permitem verificar a reprodução. Executar de novo com os mesmos dados dá exatamente o mesmo resultado; o progresso nunca é somado a um valor anterior, é **recalculado do conjunto**, e o conjunto é indexado por `id`.
 - Dados atrasados mudam o resultado na próxima execução (`pendente` → `conciliada`). Nada é reescrito: o histórico fica nos relatórios anteriores.
+- O avaliador de metas usa `compensar(razao, relatorio, meta)`: compara o relatório com o **razão** já aplicado (não com o relatório anterior) e **preserva** a prova anterior quando falta só verificação (`pendente`, `nao_verificavel`). Reverte somente diante de contradição positiva (`divergente`, `revisao`, ausência provada). Cada evento carrega `executada_em` (instante efetivo), `delta_gasto` e `moeda_gasto`.
 - `diferenciar(anterior, atual)` produz **eventos compensatórios** com `delta_progresso` e identificador determinístico: `execucao_conciliada` (+), `conciliacao_revertida` (−, quando uma correção externa ou um cancelamento invalida o que estava comprovado), `divergencia_aberta`, `divergencia_encerrada`, `revisao_aberta`, `revisao_encerrada`, `orfao_detectado`. Aplicar o mesmo evento duas vezes é inofensivo (mesmo identificador). A soma dos `delta_progresso` de uma sequência de relatórios é igual ao `comprovado` final (propriedade testada).
 - Estorno e correção **nunca editam** o registro original: o estorno é uma execução própria, conciliada como qualquer outra.
 
 ## 9. Fora do escopo e limitações
 
-- `custo_fixo_real` é um dado **interno**: os registros externos não o trazem, então a conciliação não o verifica; ele só entra nos custos das execuções já conciliadas, e esse limite deve ser lembrado ao apresentar o custo como "confirmado".
+- `custo_fixo_real` é um dado **interno**: os registros externos não o trazem, então a conciliação **nunca** o marca como verificado; ele aparece sempre em `nao_verificado` e o avaliador o trata como pior caso no limite de orçamento.
 - Custos de uma execução estornada não são devolvidos automaticamente: o estorno é uma execução própria e traz as suas taxas, se houver.
 - Sem corretoras reais, sem ordens, sem conversão cambial, sem valoração de custos em uma moeda única.
 - Sem lançamentos contábeis, sem partidas dobradas, sem fechamento de período.

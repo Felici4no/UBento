@@ -38,6 +38,10 @@ A **conciliação** (`ubento.nucleo.conciliacao`) compara execuções internas c
 recebidas, parciais, duplicidades, correções) e, separadamente, explica variações de saldo. Contrato em
 [`docs/CONCILIACAO.md`](docs/CONCILIACAO.md); cenários fictícios de reprodução em `exemplos/conciliacao/`.
 
+O **avaliador de metas** (`ubento.nucleo.avaliacao`) integra execução → conciliação → progresso → avaliação → eventos → estado, com
+carência, escopo de órfãos, orçamento com pior caso e reconciliação posterior. Contrato em
+[`docs/AVALIACAO_META.md`](docs/AVALIACAO_META.md); metas acompanhadas de ponta a ponta com dados simulados em `exemplos/avaliacao/`.
+
 ```bash
 pytest tests/nucleo          # inclui testes de propriedade (Hypothesis)
 ```

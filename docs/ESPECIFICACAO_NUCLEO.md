@@ -17,6 +17,17 @@ análise e serão revistos na fase indicada.
 | D4 | **Fontes divergentes** | Sem limite universal. A tolerância é declarada **por métrica, mercado e diferença máxima de horário**. Preço da última negociação, preço médio e cotação executável são **métricas distintas** e não são comparadas entre si. Excedida a tolerância, o dado é `divergente` e **bloqueia** quem o usa como obrigatório; nunca há média silenciosa |
 | D5 | **Tipos de objetivo** | Somente `acumular_quantidade` na v1 |
 
+### Decisões D12 a D17 (integração da conciliação ao avaliador; detalhes em `AVALIACAO_META.md`)
+
+| # | Tema | Decisão |
+| --- | --- | --- |
+| D12 | **Escopo dos órfãos** | Um registro externo sem execução interna só bloqueia metas que ele pode afetar: ativo, mercado, moeda, origem, **conta**, vínculo (estorno só importa se aponta para registro da meta) e período `[ativação, prazo]`. Conta desconhecida não exclui (conservador, sinalizado). O contrato ganha `mercado.conta_id` (opcional) |
+| D13 | **Quatro grandezas separadas** | Quantidade líquida comprovada, completude da conciliação, custos verificados e elegibilidade para concluir. Pendência nunca apaga progresso comprovado; só pendência que pode **reduzi-lo** (estorno) ou comprometer limite obrigatório impede concluir (`indeterminado`) |
+| D14 | **Idade ≠ validade ≠ cobertura** | Execução conciliada não vence. A ausência de um registro só prova inexistência com **cobertura da consulta**; sem ela é `nao_verificavel` e a **prova anterior é preservada** no razão. Só contradição positiva reverte |
+| D15 | **Custos sem evidência** | `custo_fixo_real` nunca é apresentado como verificado. O orçamento é avaliado com gasto mínimo (comprovado) e máximo (pior caso): `falso` se o mínimo estoura, `verdadeiro` se o máximo cabe, `indeterminado` no meio. Isso torna a **elegibilidade** indeterminada |
+| D16 | **Reconciliação** | Correção posterior (estorno, cancelamento ou correção externa, evidência tardia) produz o evento `reconciliada`, **preserva** a conclusão anterior na história e recalcula o estado pela mesma função de evidência. Pendência (mera possibilidade) não reabre meta atingida. `cancelada` nunca é recalculada |
+| D17 | **Invalidação e regras** | Uma invalidação já observada é fato histórico (não some se o preço voltar). `bloqueios` e `entrada` valem com `todos`; `invalidacao` com `algum`. Prazo e carência usam o instante **efetivo** da execução (`executada_em`), distinto do da chegada da evidência |
+
 Mantidas como propostas, **(a confirmar)**: D8 condição `bloqueada_por_dados` separada do estado (fase 4);
 D9 razão de reservas com invariante transacional (fase 3); D10 validade do dado no catálogo de métricas, que a
 meta só pode apertar (fase 2); D11 `AprovacaoHumana` vinculada ao hash da análise (fase 3).
@@ -82,5 +93,6 @@ e cada fórmula escolhe explicitamente.
 
 ## 5. Fora do escopo desta fase
 
-Cálculo de métricas, avaliação de regras, viabilidade, estado por eventos, reservas, persistência, monitor e
-interface. A fase 1 entrega: tipos, esquema, carregamento seguro e hash canônico.
+Catálogo completo de métricas (só o mínimo de regras necessário ao D3 existe), viabilidade, reservas, persistência, monitor e
+interface. A fase 1 entregou tipos, esquema, carregamento seguro e hash canônico; a conciliação e o avaliador (D3) estão em
+`ubento.nucleo.conciliacao` e `ubento.nucleo.avaliacao`.
