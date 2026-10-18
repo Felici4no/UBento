@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS cursor (meta_id TEXT PRIMARY KEY REFERENCES metas(met
 -- só um trecho mascarado e uma impressão (hash) para evitar a mesma chave conectada duas vezes. Os segredos ficam no cofre do sistema.
 CREATE TABLE IF NOT EXISTS conexoes (
     id TEXT PRIMARY KEY, provedor TEXT NOT NULL, apelido TEXT NOT NULL, chave_mascarada TEXT NOT NULL, impressao TEXT NOT NULL UNIQUE,
-    criada_em TEXT NOT NULL, status TEXT NOT NULL, status_em TEXT NOT NULL, permissoes TEXT NOT NULL, mensagem TEXT NOT NULL
+    criada_em TEXT NOT NULL, status TEXT NOT NULL, status_em TEXT NOT NULL, permissoes TEXT NOT NULL, mensagem TEXT NOT NULL,
+    detalhes TEXT NOT NULL DEFAULT '{}'
 );
 """
 
@@ -125,6 +126,14 @@ class Repositorio:
         if self.caminho != ":memory:":
             self.con.execute("PRAGMA journal_mode = WAL")
         self.con.executescript(ESQUEMA + _gatilhos())
+        self._migrar()
+
+    def _migrar(self) -> None:
+        """Bancos criados por versões anteriores ganham as colunas novas (sem perder nada)."""
+        colunas = {r[1] for r in self.con.execute("PRAGMA table_info(conexoes)")}
+        if "detalhes" not in colunas:
+            self.con.execute("ALTER TABLE conexoes ADD COLUMN detalhes TEXT NOT NULL DEFAULT '{}'")
+            self.con.commit()
 
     def fechar(self) -> None:
         self.con.close()
@@ -300,13 +309,17 @@ class Repositorio:
     def salvar_conexao(self, c: dict) -> None:
         with self._tx():
             self.con.execute(
-                "INSERT INTO conexoes (id, provedor, apelido, chave_mascarada, impressao, criada_em, status, status_em, permissoes, mensagem) "
-                "VALUES (:id, :provedor, :apelido, :chave_mascarada, :impressao, :criada_em, :status, :status_em, :permissoes, :mensagem)", c,
+                "INSERT INTO conexoes (id, provedor, apelido, chave_mascarada, impressao, criada_em, status, status_em, permissoes, mensagem, detalhes) "
+                "VALUES (:id, :provedor, :apelido, :chave_mascarada, :impressao, :criada_em, :status, :status_em, :permissoes, :mensagem, :detalhes)", {"detalhes": "{}", **c},
             )
 
     def atualizar_status_conexao(self, ident: str, status: str, status_em: str, mensagem: str, permissoes: str) -> None:
         with self._tx():
             self.con.execute("UPDATE conexoes SET status = ?, status_em = ?, mensagem = ?, permissoes = ? WHERE id = ?", (status, status_em, mensagem, permissoes, ident))
+
+    def atualizar_detalhes_conexao(self, ident: str, detalhes: str) -> None:
+        with self._tx():
+            self.con.execute("UPDATE conexoes SET detalhes = ? WHERE id = ?", (detalhes, ident))
 
     def remover_conexao(self, ident: str) -> None:
         with self._tx():

@@ -9,7 +9,10 @@ from PySide6.QtWidgets import QApplication
 
 from ubento.caminhos import caminho_do_banco
 from ubento.conexoes import ServicoConexoes, cofre_padrao
+from ubento.consulta import abrir
 from ubento.metas import ServicoMetas
+from ubento.telegram_comandos import responder
+from ubento.telegram_ouvinte import GerenteOuvintes
 from ubento.persistencia import Repositorio
 from ubento.workspace import Workspace
 from ubento.ui import theme
@@ -41,7 +44,11 @@ def main() -> int:
     banco = caminho_do_banco()
     metas = ServicoMetas(Repositorio(banco))
     conexoes = ServicoConexoes(metas.repo, cofre_padrao(banco.parent))  # segredos no cofre do sistema, ao lado do banco
-    window = MainWindow(Workspace(QSettings(APP_NAME, APP_NAME)), metas=metas, conexoes=conexoes)
+    # o bot do Telegram atende o chat vinculado enquanto o app estiver aberto; cada mensagem abre o banco SOMENTE para leitura
+    ouvintes = GerenteOuvintes(conexoes, lambda: (lambda texto: responder(texto, lambda: abrir(banco))))
+    window = MainWindow(Workspace(QSettings(APP_NAME, APP_NAME)), metas=metas, conexoes=conexoes, ouvintes=ouvintes)
+    ouvintes.iniciar_todos()
+    app.aboutToQuit.connect(ouvintes.parar_todos)
     window.show()
     return app.exec()
 

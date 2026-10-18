@@ -6,7 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .binance import ClienteBinance, Transporte, Verificacao, transporte_http
+from .binance import ClienteBinance, Verificacao, transporte_http
+from .telegram import ClienteTelegram
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,8 @@ class Campo:
     rotulo: str
     secreto: bool
     dica: str
+    padrao: str = r"[A-Za-z0-9]{16,128}"  # formato aceito (expressão regular, valor inteiro)
+    erro_de_formato: str = "use só letras e números, sem espaços"
 
 
 @dataclass(frozen=True)
@@ -25,12 +28,18 @@ class Provedor:
     cor: str
     campos: tuple[Campo, ...]
     como_conectar: str
-    criar_cliente: Callable[[dict[str, str], Transporte], Any] | None = None  # -> objeto com .verificar() -> Verificacao
+    criar_cliente: Callable[[dict[str, str], Any], Any] | None = None  # -> objeto com .verificar() -> Verificacao
     disponivel: bool = True  # False = lugar reservado: aparece na tela como "em breve" e ainda não conecta
+    garantia: str = ("A chave e o segredo ficam só no cofre deste computador (Windows) e nunca no banco do UBento. "
+                     "O UBento só lê dados: não negocia nem saca.")
 
 
-def _binance(credenciais: dict[str, str], transporte: Transporte) -> ClienteBinance:
+def _binance(credenciais: dict[str, str], transporte) -> ClienteBinance:
     return ClienteBinance(credenciais["api_key"], credenciais["api_secret"], transporte)
+
+
+def _telegram(credenciais: dict[str, str], transporte) -> ClienteTelegram:
+    return ClienteTelegram(credenciais["token"], transporte)
 
 
 PROVEDORES: dict[str, Provedor] = {
@@ -47,11 +56,17 @@ PROVEDORES: dict[str, Provedor] = {
         ),
         criar_cliente=_binance,
     ),
-    # Lugar reservado: não pede nem guarda nada ainda. Quando existir, entra aqui o campo do token do bot e um cliente com `verificar()`.
     "telegram": Provedor(
-        id="telegram", nome="Telegram", descricao="Bot para avisos e consultas pelo celular", cor="#27A0DF", campos=(),
-        como_conectar="Em breve: conecte um bot do Telegram para receber avisos e consultar suas metas pelo celular. Por enquanto nada é pedido, enviado nem guardado.",
-        disponivel=False,
+        id="telegram", nome="Telegram", descricao="Bot para consultar suas metas pelo celular", cor="#27A0DF",
+        campos=(Campo("token", "Token do bot", True, "123456789:AA… (do @BotFather)", r"\d{6,14}:[A-Za-z0-9_-]{30,64}",
+                      "copie o token inteiro, com o número, os dois-pontos e o resto"),),
+        como_conectar=(
+            "No Telegram, abra o @BotFather, envie /newbot, escolha um nome e copie o token que ele mostra. Cole aqui. "
+            "Depois de conectar, vincule o seu chat com um código: só o chat vinculado é atendido; qualquer outra pessoa que achar o bot é ignorada."
+        ),
+        criar_cliente=_telegram,
+        garantia=("O token fica só no cofre deste computador e nunca no banco. O bot só responde CONSULTAS de leitura (suas metas), e só ao chat que você vincular, "
+                  "enquanto o UBento estiver aberto. Atenção: as respostas passam pelos servidores do Telegram (conversas com bots não têm criptografia de ponta a ponta)."),
     ),
 }
 

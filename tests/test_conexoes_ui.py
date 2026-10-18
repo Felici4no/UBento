@@ -6,17 +6,18 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import re  # noqa: E402
 import time  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLineEdit  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit  # noqa: E402
 
 from test_conexoes import CHAVE, LEITURA, SEGREDO, Rede  # noqa: E402
 from ubento.conexoes import CONECTADA, ERRO, REPROVADA, CofreMemoria, ServicoConexoes  # noqa: E402
 from ubento.metas import ServicoMetas  # noqa: E402
 from ubento.persistencia import Repositorio  # noqa: E402
 from ubento.ui import theme  # noqa: E402
-from ubento.ui.components import Label, PillButton  # noqa: E402
+from ubento.ui.components import Label  # noqa: E402
 from ubento.ui.controls import Chip  # noqa: E402
 from ubento.ui.main_window import MainWindow  # noqa: E402
 from ubento.workspace import Workspace  # noqa: E402
@@ -121,13 +122,103 @@ def test_testar_e_remover_pela_secao(janela):
     assert "não encontrada" in avisos[-1][0]
 
 
-def test_telegram_aparece_como_em_breve_e_nao_conecta(janela):
+def test_provedor_reservado_aparece_como_em_breve_e_nao_abre_dialogo(janela, monkeypatch):
+    from dataclasses import replace
+
+    from ubento.conexoes import PROVEDORES
+
     w, secao, servico = janela
-    t = textos(secao)
-    assert "Telegram" in t and "Em breve" in t and "bot do Telegram" in t  # lugar reservado, visível mesmo sem conexões
+    monkeypatch.setitem(PROVEDORES, "futuro", replace(PROVEDORES["telegram"], id="futuro", nome="Futuro", como_conectar="Em breve: mais um provedor.", disponivel=False))
+    secao.refresh()
+    assert "Futuro" in textos(secao) and "Em breve" in textos(secao)
     with pytest.raises(ValueError, match="não está disponível"):
-        secao.criar_dialogo("telegram")
-    d = secao.criar_dialogo()
-    pilulas = {b.text(): b for b in d.findChildren(PillButton)}
-    assert pilulas["Binance"].isEnabled() and pilulas["Telegram · em breve"].isEnabled() is False  # aparece, mas não se escolhe
-    assert w.rede.pedidos == [] and servico.listar() == [] and w.cofre._dados == {}  # nada foi pedido nem guardado
+        secao.criar_dialogo("futuro")
+    assert w.rede.pedidos == [] and servico.listar() == [] and w.cofre._dados == {}
+
+
+def test_conectar_telegram_vincular_chat_enviar_teste_e_desvincular(janela):
+    from test_telegram import DONO, TOKEN, FakeTelegram
+
+    w, secao, servico = janela
+    tg = FakeTelegram()
+    servico.transportes["telegram"] = tg
+    avisos = []
+    secao.notify.connect(lambda m, ok: avisos.append((m, ok)))
+
+    d = secao.criar_dialogo("telegram")
+    assert d.campos["token"].echoMode() == QLineEdit.EchoMode.Password  # o token nunca aparece na tela
+    assert any("BotFather" in x.text() for x in d.findChildren(QLabel))  # o passo a passo para criar o bot está no diálogo
+    d.definir(apelido="Meu bot", token="123456789:curto")
+    d.conectar()
+    assert "incompleto" in d.erro.text() and d.campos["token"].text() == "123456789:curto" and tg.urls == []  # erro mantém o digitado, sem rede
+    d.definir(apelido="Meu bot", token=TOKEN)
+    d.conectar()
+    c = d.conexao
+    assert c is not None and c.detalhes["bot_username"] == "ubento_teste_bot" and not c.chat_vinculado
+    secao.refresh()
+    t = textos(secao)
+    assert "@ubento_teste_bot" in t and "chat ainda não vinculado" in t and TOKEN not in t and "123456789:••••1234" in t
+
+    # vínculo: código de uso único; só o chat privado que o enviar passa a ser atendido
+    v = secao.criar_vinculo(c.id, automatico=False)
+    v.iniciar()
+    assert re.fullmatch(r"/vincular [0-9A-F]{8}", v.mensagem.text())
+    tg.mandar(999, v.mensagem.text(), tipo="group")  # grupo com o código certo
+    v.procurar()
+    assert v.conexao is None and not servico.obter(c.id).chat_vinculado
+    tg.mandar(DONO, v.mensagem.text())
+    v.procurar()
+    assert v.conexao is not None and servico.obter(c.id).detalhes["chat_id"] == DONO
+    secao.refresh()
+    assert "vinculado a Lucas F" in textos(secao)
+
+    secao.enviar_teste(c.id)
+    assert tg.enviadas[-1][0] == DONO and avisos[-1] == ("Mensagem de teste enviada ao seu chat", True)
+
+    secao._confirmar = lambda *a: False
+    secao.desvincular(c.id)
+    assert servico.obter(c.id).chat_vinculado  # cancelou: nada muda
+    secao._confirmar = lambda *a: True
+    secao.desvincular(c.id)
+    assert not servico.obter(c.id).chat_vinculado and "chat ainda não vinculado" in textos(secao)
+    secao.remover(c.id)
+    assert servico.listar() == [] and w.cofre._dados == {}  # token apagado do cofre
+    secao.enviar_teste("inexistente")
+    assert "não encontrada" in avisos[-1][0]
+
+
+def test_o_ouvinte_so_inicia_depois_do_vinculo_pela_secao(janela, monkeypatch):
+    from test_telegram import DONO, TOKEN, FakeTelegram
+    from ubento.ui.conexoes import VinculoTelegramDialog
+
+    w, secao, servico = janela
+    tg = FakeTelegram()
+    servico.transportes["telegram"] = tg
+    eventos = []
+
+    class Gerente:
+        def iniciar(self, ident):
+            eventos.append(("iniciar", ident))
+
+        def parar(self, ident):
+            eventos.append(("parar", ident))
+
+        def estado(self, ident):
+            return "ouvindo" if ("iniciar", ident) in eventos and ("parar", ident) not in eventos else "parado"
+
+    secao.ouvintes = Gerente()
+    c = servico.adicionar("telegram", "Bot", {"token": TOKEN})
+
+    def exec_simulado(self):  # no lugar de abrir a janela: o usuário "envia" o código e o diálogo o encontra
+        self.automatico = False
+        self.iniciar()
+        tg.mandar(DONO, self.mensagem.text())
+        self.procurar()
+        return 1 if self.conexao else 0
+
+    monkeypatch.setattr(VinculoTelegramDialog, "exec", exec_simulado)
+    secao.vincular_chat(c.id)
+    assert eventos == [("iniciar", c.id)] and servico.obter(c.id).chat_vinculado and "Atendendo" in textos(secao)
+    secao._confirmar = lambda *a: True
+    secao.desvincular(c.id)  # desvincular para o ouvinte antes de limpar o chat
+    assert eventos[-1] == ("parar", c.id) and "Parado" not in textos(secao)  # sem chat vinculado não há etiqueta de ouvinte

@@ -222,7 +222,7 @@ def test_conexao_e_segredo_sobrevivem_a_reiniciar_o_app(tmp_path):
 def test_tabela_de_conexoes_nao_tem_coluna_para_segredo(tmp_path):
     repo = Repositorio(tmp_path / "x.db")
     colunas = {r[1] for r in repo.con.execute("PRAGMA table_info(conexoes)")}
-    assert colunas == {"id", "provedor", "apelido", "chave_mascarada", "impressao", "criada_em", "status", "status_em", "permissoes", "mensagem"}
+    assert colunas == {"id", "provedor", "apelido", "chave_mascarada", "impressao", "criada_em", "status", "status_em", "permissoes", "mensagem", "detalhes"}
     repo.fechar()
 
 
@@ -234,9 +234,15 @@ def test_o_mcp_de_consulta_nao_enxerga_conexoes_nem_cofre():
         assert "conexoes" not in fonte.replace("ubento.conexoes", "") and "cofre" not in fonte and "api_secret" not in fonte, arquivo
 
 
-def test_provedor_reservado_nao_conecta_e_nao_toca_rede_nem_cofre():
+def test_provedor_reservado_nao_conecta_e_nao_toca_rede_nem_cofre(monkeypatch):
+    """O mecanismo de "em breve" continua valendo para futuros provedores."""
+    from dataclasses import replace
+
+    from ubento.conexoes import PROVEDORES
+
+    monkeypatch.setitem(PROVEDORES, "futuro", replace(PROVEDORES["telegram"], id="futuro", nome="Futuro", disponivel=False))
     rede, cofre = Rede(), CofreMemoria()
     sv = servico(rede, cofre)
     with pytest.raises(ErroDeConfiguracao, match="ainda não está disponível"):
-        sv.adicionar("telegram", "meu bot", {"token": "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
+        sv.adicionar("futuro", "meu", {"token": "123456789:AAFakeTokenFakeTokenFakeToken_1234"})
     assert rede.pedidos == [] and cofre._dados == {} and sv.listar() == []

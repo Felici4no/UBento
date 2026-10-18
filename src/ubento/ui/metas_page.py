@@ -18,6 +18,7 @@ from ..metas import (
 from ..nucleo.carregador import carregar_arquivo
 from ..nucleo.esquema import EstadoMeta
 from ..nucleo.tipos import Tri
+from ..textos import legivel
 from ..workspace import Workspace
 from . import theme
 from .components import ActionButton, Card, Label, PillButton, setup
@@ -38,20 +39,6 @@ TRI = {Tri.VERDADEIRO: ("Sim", theme.GREEN), Tri.FALSO: ("Não", theme.RED), Tri
 def num(valor: Decimal) -> str:
     texto = format(valor.normalize(), "f")
     return texto if "." not in texto else texto.rstrip("0").rstrip(".")
-
-
-# os identificadores do domínio não têm acento; na tela eles voltam a ser português
-ACENTOS = {
-    "nao": "não", "execucao": "execução", "execucoes": "execuções", "pendencia": "pendência", "conciliacao": "conciliação",
-    "conciliada": "conciliada", "avaliacao": "avaliação", "invalidacao": "invalidação", "evidencia": "evidência", "orcamento": "orçamento",
-    "possivel": "possível", "verificavel": "verificável", "indeterminado": "indeterminado", "ate": "até", "registro": "registro",
-    "reducao": "redução", "excecao": "exceção", "divergencia": "divergência", "revisao": "revisão", "movimentacao": "movimentação",
-    "reconciliada": "reconciliada", "bloqueio": "bloqueio", "cotacao": "cotação", "periodo": "período", "ja": "já",
-}
-
-
-def legivel(identificador: str) -> str:
-    return " ".join(ACENTOS.get(parte, parte) for parte in identificador.split("_"))
 
 
 def exemplos_dir() -> Path | None:
