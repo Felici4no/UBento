@@ -36,7 +36,7 @@ def test_validate_reasons(store):
 
 def test_execute_moves_balances_and_records_transfer(store):
     before = store.holdings.copy()
-    count = len(store.transfers)
+    count = len(store.decisions)
     fired = []
     store.changed.connect(lambda: fired.append(1))
 
@@ -45,8 +45,9 @@ def test_execute_moves_balances_and_records_transfer(store):
     q = make_quote("USD", "ETH", 500)
     assert store.holdings["USD"] == pytest.approx(before["USD"] - 500)
     assert store.holdings["ETH"] == pytest.approx(before["ETH"] + q.receive_amount)
-    assert len(store.transfers) == count + 1
-    assert store.transfers[0].title == "USD para ETH"
+    assert len(store.decisions) == count + 1
+    assert store.decisions[0].title == "Swap USD → ETH"
+    assert store.decisions[0].kind == "swap"
     assert fired == [1]
 
 
@@ -65,6 +66,6 @@ def test_history_ends_at_current_total(store, key):
     assert [d for d, _ in series] == sorted(d for d, _ in series)
 
 
-def test_activity_sums_to_transfer_count(store):
+def test_activity_sums_to_decision_count(store):
     weeks = store.month_weeks()
-    assert sum(c or 0 for w in weeks for _, c in w) == store.transfers_count()
+    assert sum(c or 0 for w in weeks for _, c in w) == store.decisions_count()

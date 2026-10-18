@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 
 from PySide6.QtCore import QObject, QSettings, Signal
 
-from .store import Store
+from . import formatting
+from .store import RANGES, Store
 
 OVERVIEW = "overview"
 COLORS = ["#3B6BFF", "#B14CF0", "#2EE081", "#F2B01E", "#EF4B3F", "#2FC6E8", "#F26FB1"]
@@ -28,18 +29,59 @@ class Agent:
     store: Store = field(repr=False, default=None)  # type: ignore[assignment]
 
 
+DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1M"}
+
+
 class Workspace(QObject):
-    changed = Signal()
+    changed = Signal()  # estrutura ou aparência dos agentes mudou
+    prefs_changed = Signal()
 
     def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
         self._settings = settings
+        self.prefs: dict = dict(DEFAULT_PREFS)
         self.overview_name = "Geral"
         self.agents: list[Agent] = []
         self.overview = Store.combined([])
         if not self._load():
             self.agents = [self._make("Pessoal", COLORS[0], "main", 1.0), self._make("Empresa", COLORS[1], "empresa", 2.6)]
         self._refresh_overview()
+        formatting.set_hidden(bool(self.prefs["hide_values"]))
+
+    # -- preferências ------------------------------------------------------
+
+    def pref(self, key: str):
+        return self.prefs[key]
+
+    def set_pref(self, key: str, value) -> None:
+        if key not in DEFAULT_PREFS or self.prefs.get(key) == value:
+            return
+        if key == "default_range" and value not in RANGES:
+            return
+        self.prefs[key] = value
+        if key == "hide_values":
+            formatting.set_hidden(bool(value))
+            self._repaint_all()
+        self._save()
+        self.prefs_changed.emit()
+
+    def _repaint_all(self) -> None:
+        """Força todos os cards a reler os valores (necessário ao mascarar/desmascarar)."""
+        for agent in self.agents:
+            agent.store.changed.emit()
+
+    # -- dados -------------------------------------------------------------
+
+    def reset_demo_data(self) -> None:
+        """Restaura os saldos e decisões de demonstração, mantendo nomes, cores e ordem."""
+        for agent in self.agents:
+            agent.store.reset()
+
+    def restore_default_agents(self) -> None:
+        """Volta ao conjunto inicial de agentes."""
+        self.agents = [self._make("Pessoal", COLORS[0], "main", 1.0), self._make("Empresa", COLORS[1], "empresa", 2.6)]
+        self.overview_name = "Geral"
+        self._commit()
 
     # -- consulta ----------------------------------------------------------
 
@@ -65,7 +107,7 @@ class Workspace(QObject):
             return None
         copy = self._make(f"{src.name} (cópia)", src.color, src.seed, src.scale)
         copy.store.holdings = dict(src.store.holdings)
-        copy.store.transfers = list(src.store.transfers)
+        copy.store.decisions = list(src.store.decisions)
         self.agents.insert(self.index(agent_id) + 1, copy)
         self._commit()
         return copy
@@ -101,7 +143,19 @@ class Workspace(QObject):
 
     def _make(self, name: str, color: str, seed: str, scale: float) -> Agent:
         agent_id = f"a{random.Random().randrange(16**8):08x}"
-        return Agent(agent_id, name, color, seed, scale, Store(seed=seed, scale=scale))
+        return Agent(agent_id, name, color, seed, scale, self._store(agent_id, seed, scale))
+
+    @staticmethod
+    def _store(agent_id: str, seed: str, scale: float) -> Store:
+        store = Store(seed=seed, scale=scale)
+        store.owner_id = agent_id
+        return store
+
+    def performance(self, agent: Agent, range_key: str) -> tuple[float, float]:
+        """(variação %, variação em USD) do patrimônio do agente no período."""
+        series = agent.store.history(range_key)
+        first, last = series[0][1], series[-1][1]
+        return ((last / first - 1) * 100 if first else 0.0), last - first
 
     def _refresh_overview(self) -> None:
         self.overview.set_parts([a.store for a in self.agents])
@@ -117,6 +171,7 @@ class Workspace(QObject):
             return
         data = {
             "overview_name": self.overview_name,
+            "prefs": self.prefs,
             "agents": [{"id": a.id, "name": a.name, "color": a.color, "seed": a.seed, "scale": a.scale} for a in self.agents],
         }
         self._settings.setValue("workspace", json.dumps(data))
@@ -131,8 +186,9 @@ class Workspace(QObject):
             if not data or not data["agents"]:
                 return False
             self.overview_name = data.get("overview_name", "Geral")
+            self.prefs.update({k: v for k, v in data.get("prefs", {}).items() if k in DEFAULT_PREFS})
             self.agents = [
-                Agent(d["id"], d["name"], d["color"], d["seed"], float(d["scale"]), Store(seed=d["seed"], scale=float(d["scale"])))
+                Agent(d["id"], d["name"], d["color"], d["seed"], float(d["scale"]), self._store(d["id"], d["seed"], float(d["scale"])))
                 for d in data["agents"]
             ]
             return True

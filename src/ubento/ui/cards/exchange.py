@@ -6,7 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, QRegularExpression, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen, QRegularExpressionValidator
 from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLineEdit, QMenu, QVBoxLayout, QWidget
 
-from ...formatting import money, number
+from ...formatting import amount, money, number
 from ...store import ASSETS, Store
 from .. import icons, theme
 from ..components import Card, Label, RoundButton, draw_asset, hover_color, setup
@@ -44,7 +44,7 @@ class AssetSelector(QAbstractButton):
         menu = QMenu(self)
         for sym, asset in ASSETS.items():
             held = self._store.holdings.get(sym, 0.0)
-            menu.addAction(f"{sym}  ·  {asset.name}  ·  {number(held, asset.decimals)}").setData(sym)
+            menu.addAction(f"{sym}  ·  {asset.name}  ·  {amount(held, asset.decimals)}").setData(sym)
         chosen = menu.exec(self.mapToGlobal(self.rect().bottomRight()) - QPointF(220, 0).toPoint())
         if chosen:
             self.selected.emit(chosen.data())
@@ -111,7 +111,7 @@ class AmountPanel(QFrame):
 
     def set_available(self, symbol: str, value: float) -> None:
         decimals = ASSETS[symbol].decimals
-        self.avail_value.setText(money(value) if symbol == "USD" else f"{number(value, decimals)} {symbol}")
+        self.avail_value.setText(money(value) if symbol == "USD" else f"{amount(value, decimals)} {symbol}")
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)

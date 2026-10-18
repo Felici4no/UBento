@@ -11,6 +11,20 @@ MONTHS = [
 ]
 
 
+MASK = "••••"
+_hidden = False
+
+
+def set_hidden(hidden: bool) -> None:
+    """Liga/desliga o modo privacidade: saldos e valores passam a ser mascarados."""
+    global _hidden
+    _hidden = hidden
+
+
+def is_hidden() -> bool:
+    return _hidden
+
+
 def number(value: float, decimals: int = 2) -> str:
     """`1234.5` -> `1.234,50`."""
     text = f"{abs(value):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -18,12 +32,16 @@ def number(value: float, decimals: int = 2) -> str:
 
 
 def money(value: float) -> str:
-    """`1234.5` -> `$1.234,50`."""
+    """`1234.5` -> `$1.234,50` (ou `$••••` no modo privacidade)."""
+    if _hidden:
+        return f"${MASK}"
     return f"${number(value, 2)}" if value >= 0 else f"-${number(abs(value), 2)}"
 
 
 def split_money(value: float) -> tuple[str, str]:
     """Separa a parte inteira dos centavos, para destacar visualmente: ('$1.234', ',50')."""
+    if _hidden:
+        return f"${MASK}", ""
     text = money(value)
     head, _, cents = text.rpartition(",")
     return head, "," + cents
@@ -31,9 +49,16 @@ def split_money(value: float) -> tuple[str, str]:
 
 def compact(value: float) -> str:
     """`1240` -> `$1,2K`; `525` -> `$525`."""
+    if _hidden:
+        return f"${MASK}"
     if abs(value) >= 1000:
         return f"${number(value / 1000, 1)}K"
     return f"${number(value, 0)}"
+
+
+def amount(value: float, decimals: int = 2) -> str:
+    """Quantidade de um ativo (saldo); mascarada no modo privacidade."""
+    return MASK if _hidden else number(value, decimals)
 
 
 def pct(value: float) -> str:

@@ -30,6 +30,8 @@ class TabHeader(QWidget):
     rename_requested = Signal(str)
     context_requested = Signal(object, QPoint)  # (chave ou None, posição global)
     reordered = Signal(str, int)  # (chave do agente, novo índice entre os agentes)
+    settings_requested = Signal()
+    privacy_toggled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,6 +41,8 @@ class TabHeader(QWidget):
         self._press: tuple[str, QPointF] | None = None
         self._dragging = False
         self._font = theme.font(15, W.Medium)
+        self._greeting = ""
+        self._hidden = False
         self.setMouseTracking(True)
         self.setFixedHeight(HEIGHT)
 
@@ -46,6 +50,14 @@ class TabHeader(QWidget):
 
     def set_tabs(self, tabs: list[Tab], current: str) -> None:
         self._tabs, self._current = tabs, current
+        self.update()
+
+    def set_greeting(self, name: str) -> None:
+        self._greeting = f"Olá, {name}" if name else ""
+        self.update()
+
+    def set_hidden(self, hidden: bool) -> None:
+        self._hidden = hidden
         self.update()
 
     def set_current(self, key: str) -> None:
@@ -64,7 +76,7 @@ class TabHeader(QWidget):
     def _rects(self) -> tuple[list[tuple[Tab, QRectF]], QRectF]:
         left = PAD_X + self._brand_width() + 36
         plus_w = TAB_H
-        avail = self.width() - left - PAD_X - plus_w - 12
+        avail = self.width() - left - self._right_width() - plus_w - 24
         gap = 6.0
         widths = [self._natural(t) for t in self._tabs]
         need = sum(widths) + gap * max(0, len(widths) - 1)
@@ -78,7 +90,25 @@ class TabHeader(QWidget):
             x += w + gap
         return out, QRectF(x + 6, y, plus_w, TAB_H)
 
+    def _greeting_width(self) -> float:
+        return QFontMetrics(theme.font(14, W.Normal)).horizontalAdvance(self._greeting) if self._greeting else 0.0
+
+    def _right_width(self) -> float:
+        greet = self._greeting_width()
+        return PAD_X + TAB_H * 2 + 8 + (greet + 16 if greet else 0)
+
+    def _right_rects(self) -> tuple[QRectF, QRectF]:
+        y = (HEIGHT - TAB_H) / 2
+        gear = QRectF(self.width() - PAD_X - TAB_H, y, TAB_H, TAB_H)
+        eye = QRectF(gear.left() - 8 - TAB_H, y, TAB_H, TAB_H)
+        return eye, gear
+
     def _hit(self, pos: QPointF) -> str | None:
+        eye, gear = self._right_rects()
+        if gear.contains(pos):
+            return "gear"
+        if eye.contains(pos):
+            return "eye"
         rects, plus = self._rects()
         if plus.contains(pos):
             return "+"
@@ -94,15 +124,19 @@ class TabHeader(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             if hit == "+":
                 self.add_requested.emit()
+            elif hit == "gear":
+                self.settings_requested.emit()
+            elif hit == "eye":
+                self.privacy_toggled.emit()
             elif hit:
                 self._press, self._dragging = (hit, e.position()), False
                 self.selected.emit(hit)
         elif e.button() == Qt.MouseButton.RightButton:
-            self.context_requested.emit(None if hit in (None, "+") else hit, e.globalPosition().toPoint())
+            self.context_requested.emit(None if hit in (None, "+", "gear", "eye") else hit, e.globalPosition().toPoint())
 
     def mouseDoubleClickEvent(self, e) -> None:
         hit = self._hit(e.position())
-        if e.button() == Qt.MouseButton.LeftButton and hit and hit != "+":
+        if e.button() == Qt.MouseButton.LeftButton and hit and hit not in ("+", "gear", "eye"):
             self.rename_requested.emit(hit)
 
     def mouseMoveEvent(self, e) -> None:
@@ -173,6 +207,28 @@ class TabHeader(QWidget):
         p.setPen(QPen(QColor(theme.OUTLINE), 1.2))
         p.drawEllipse(plus.adjusted(0.6, 0.6, -0.6, -0.6))
         p.drawPixmap(QPointF(plus.center().x() - 9, plus.center().y() - 9), icons.pixmap("plus", theme.TEXT if hot else theme.MUTED, 18, 2.0))
+        self._paint_right(p)
+
+    def _paint_right(self, p: QPainter) -> None:
+        eye, gear = self._right_rects()
+        if self._greeting:
+            p.setFont(theme.font(14, W.Normal))
+            p.setPen(QColor(theme.MUTED))
+            p.drawText(QRectF(eye.left() - 16 - self._greeting_width() - 4, 0, self._greeting_width() + 8, HEIGHT),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, self._greeting)
+        for key, rect, icon in (('eye', eye, 'eye-off' if self._hidden else 'eye'), ('gear', gear, 'settings')):
+            active = key == 'gear' and self._current == 'settings'
+            on = key == 'eye' and self._hidden
+            hot = self._hover == key
+            if active:
+                p.setBrush(QColor('#FFFFFF'))
+                p.setPen(Qt.PenStyle.NoPen)
+            else:
+                p.setBrush(QColor(255, 255, 255, 18 if hot else (10 if on else 0)))
+                p.setPen(QPen(QColor(theme.OUTLINE), 1.2))
+            p.drawEllipse(rect.adjusted(0.6, 0.6, -0.6, -0.6))
+            fg = '#0A0A0C' if active else (theme.TEXT if (hot or on) else theme.MUTED)
+            p.drawPixmap(QPointF(rect.center().x() - 9, rect.center().y() - 9), icons.pixmap(icon, fg, 18, 1.9))
 
     def _paint_brand(self, p: QPainter) -> None:
         y = (HEIGHT - 34) / 2

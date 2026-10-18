@@ -260,3 +260,61 @@ class Toast(QWidget):
         p.setFont(theme.font(14, W.Medium))
         p.drawText(QRectF(46, 0, self.width() - 56, self.height()), Qt.AlignmentFlag.AlignVCenter, self._text)
 
+
+
+class Switch(QAbstractButton):
+    """Interruptor liga/desliga."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(46, 28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        setup(p)
+        on = self.isChecked()
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        track = QColor(theme.BLUE) if on else QColor("#26262D")
+        p.setBrush(hover_color(track) if self.underMouse() and not on else track)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        knob = rect.height() - 6
+        x = rect.right() - knob - 3 if on else rect.left() + 3
+        p.setBrush(QColor("#FFFFFF" if on else "#A2A2AB"))
+        p.drawEllipse(QRectF(x, rect.top() + 3, knob, knob))
+
+
+class ActionButton(QAbstractButton):
+    """Botão em cápsula com contorno; `danger` pinta o texto de vermelho."""
+
+    def __init__(self, text: str, *, danger=False, primary=False, height=38, pad=18, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self._danger, self._primary, self._pad = danger, primary, pad
+        self.setFont(theme.font(14, W.Medium))
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def sizeHint(self) -> QSize:
+        return QSize(QFontMetrics(self.font()).horizontalAdvance(self.text()) + 2 * self._pad, self.height())
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        setup(p)
+        rect = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
+        hot = self.underMouse()
+        if self._primary:
+            p.setBrush(hover_color(QColor(theme.BLUE)) if hot else QColor(theme.BLUE))
+            p.setPen(Qt.PenStyle.NoPen)
+            fg = QColor("white")
+        else:
+            p.setBrush(QColor(255, 255, 255, 14 if hot else 0))
+            p.setPen(QPen(QColor("#5A2B2B" if self._danger else theme.OUTLINE), 1.2))
+            fg = QColor(theme.RED if self._danger else theme.TEXT)
+        p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        p.setPen(fg)
+        p.setFont(self.font())
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.text())

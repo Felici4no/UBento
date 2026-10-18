@@ -6,7 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
-from ...formatting import money, number, pct
+from ...formatting import amount, money, number, pct
 from ...store import ASSETS, Store
 from .. import theme
 from ..components import Card, Label, RoundButton, setup
@@ -166,7 +166,7 @@ class CoinCard(Card):
         series = self.store.usdc_series()
         change = (series[-1] / series[0] - 1) * 100
         self.value.setText(money(held * price))
-        self.units.setText(f"{number(held, 2)} {SYMBOL}")
+        self.units.setText(f"{amount(held, 2)} {SYMBOL}")
         self.spark.set_values(series)
         self.footer_rate.setText(f"1 USDC = ${number(price, 3)}   |")
         self.footer_delta.setText(f"{pct(change)} {'↓' if change < 0 else '↑'}")

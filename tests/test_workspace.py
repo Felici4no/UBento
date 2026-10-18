@@ -27,3 +27,34 @@ def test_duplicate_copies_balances():
     assert ws.agents[1] is copy
     assert copy.store.holdings == src.store.holdings
     assert copy.store.holdings is not src.store.holdings
+
+
+def test_prefs_persist_and_hide_values_masks_formatting(tmp_path):
+    from ubento import formatting
+
+    path = str(tmp_path / "cfg.ini")
+    ws = Workspace(QSettings(path, QSettings.Format.IniFormat))
+    try:
+        ws.set_pref("user_name", "Lucas")
+        ws.set_pref("hide_values", True)
+        ws.set_pref("default_range", "6M")
+        ws.set_pref("default_range", "bogus")  # inválido é ignorado
+        assert formatting.money(1234.5) == "$••••"
+
+        again = Workspace(QSettings(path, QSettings.Format.IniFormat))
+        assert again.prefs == {"user_name": "Lucas", "hide_values": True, "default_range": "6M"}
+        assert formatting.is_hidden()
+    finally:
+        formatting.set_hidden(False)
+
+
+def test_restore_defaults_and_demo_reset():
+    ws = Workspace()
+    ws.add("Extra")
+    ws.restore_default_agents()
+    assert [a.name for a in ws.agents] == ["Pessoal", "Empresa"]
+
+    store = ws.agents[0].store
+    store.execute("USD", "ETH", 500)
+    ws.reset_demo_data()
+    assert store.holdings["USD"] == 6900.0

@@ -2,7 +2,8 @@
 
     python scripts/screenshot.py saida.png [--tab N] [--hover] [--menu CHAVE|vazio]
 
---tab N      seleciona a aba N (0 = Geral)
+--tab N      seleciona a aba N (0 = Geral) ou "settings"
+--hide       liga o modo ocultar valores
 --hover      simula o mouse sobre o gráfico de barras
 --menu K     salva também <saida>-menu.png com o menu de botão direito
              (K = índice da aba, ou "vazio" para o menu do espaço vazio do header)
@@ -38,12 +39,15 @@ def main() -> None:
     win.show()
     app.processEvents()
 
-    keys = ["overview"] + [a.id for a in ws.agents]
-    tab = int(arg("--tab") or 0)
+    keys = ["overview"] + [a.id for a in ws.agents] + ["settings"]
+    which = arg("--tab") or "0"
+    tab = len(keys) - 1 if which == "settings" else int(which)
+    if "--hide" in sys.argv:
+        ws.set_pref("hide_values", True)
     win.select(keys[tab])
     app.processEvents()
 
-    if "--hover" in sys.argv:
+    if "--hover" in sys.argv and keys[tab] != "settings":
         chart = win.dashboard(keys[tab]).total.chart
         chart._hover = int(len(chart._points) * 0.62)
         chart._anim.stop()

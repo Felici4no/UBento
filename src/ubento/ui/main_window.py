@@ -11,10 +11,13 @@ from PySide6.QtWidgets import (
 
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
+
+SETTINGS = "settings"
 from . import theme
 from .components import Toast
 from .dashboard import Dashboard
 from .header import Tab, TabHeader
+from .settings import SettingsPage
 
 
 class _Canvas(QWidget):
@@ -66,14 +69,20 @@ class MainWindow(QMainWindow):
         self.header.rename_requested.connect(self.rename)
         self.header.context_requested.connect(self.show_menu)
         self.header.reordered.connect(workspace.move_to)
+        self.header.settings_requested.connect(lambda: self.select(SETTINGS))
+        self.header.privacy_toggled.connect(lambda: workspace.set_pref('hide_values', not workspace.pref('hide_values')))
         workspace.changed.connect(self.sync)
+        workspace.prefs_changed.connect(self._apply_prefs)
+        self._settings_page()
         self.sync()
+        self._apply_prefs()
 
     # -- páginas -----------------------------------------------------------
 
     def _page(self, key: str, store: Store) -> QScrollArea:
-        dash = Dashboard(store)
+        dash = Dashboard(store, self.workspace if key == OVERVIEW else None)
         dash.notify.connect(self.toast.show_message)
+        dash.open_agent.connect(self.select)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -84,12 +93,33 @@ class MainWindow(QMainWindow):
         self.pages[key] = scroll
         return scroll
 
+    def _settings_page(self) -> None:
+        page = SettingsPage(self.workspace)
+        page.notify.connect(self.toast.show_message)
+        page.add_agent_requested.connect(self.add_agent)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setAutoFillBackground(False)
+        scroll.setWidget(page)
+        page.setAutoFillBackground(False)
+        self.stack.addWidget(scroll)
+        self.pages[SETTINGS] = scroll
+
+    def _apply_prefs(self) -> None:
+        ws = self.workspace
+        self.header.set_greeting(ws.pref('user_name'))
+        self.header.set_hidden(ws.pref('hide_values'))
+        for key, page in self.pages.items():
+            if key != SETTINGS and ws.pref('default_range') != self.dashboard(key).total.range_key:
+                self.dashboard(key).total.set_range(ws.pref('default_range'))
+
     def dashboard(self, key: str) -> Dashboard:
         return self.pages[key].widget()  # type: ignore[return-value]
 
     def sync(self) -> None:
         ws = self.workspace
-        wanted = {OVERVIEW} | {a.id for a in ws.agents}
+        wanted = {OVERVIEW, SETTINGS} | {a.id for a in ws.agents}
         for key in list(self.pages):
             if key not in wanted:
                 page = self.pages.pop(key)
@@ -100,6 +130,7 @@ class MainWindow(QMainWindow):
         for agent in ws.agents:
             if agent.id not in self.pages:
                 self._page(agent.id, agent.store)
+                self.dashboard(agent.id).total.set_range(ws.pref('default_range'))
         if self.current not in self.pages:
             self.current = OVERVIEW
         tabs = [Tab(OVERVIEW, ws.overview_name, None)] + [Tab(a.id, a.name, a.color) for a in ws.agents]

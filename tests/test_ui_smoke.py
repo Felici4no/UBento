@@ -35,7 +35,7 @@ def test_exchange_button_runs_the_swap(window):
     assert ex.button._reason is None
     ex._submit()
     assert store.holdings["USD"] == pytest.approx(usd - 500)
-    assert store.transfers[0].title == "USD para ETH"
+    assert store.decisions[0].title == "Swap USD → ETH"
 
 
 def test_exchange_blocks_invalid_amount(window):
@@ -67,7 +67,7 @@ def test_range_change_updates_chart_and_total(window):
 
 
 def test_buy_usdc_shortcut_prefills_exchange(window):
-    dash = window.dashboard("overview")
+    dash = window.dashboard(window.workspace.agents[0].id)
     dash.coin.buy_clicked.emit()
     assert (dash.exchange.send, dash.exchange.receive) == ("USD", "USDC")
 
@@ -107,3 +107,53 @@ def test_context_menu_contents(window):
     assert labels(window.build_menu("overview")) == ["Renomear…"]
     agent_menu = labels(window.build_menu(window.workspace.agents[0].id))
     assert agent_menu == ["Renomear…", "Cor", "Duplicar", "Mover para a esquerda", "Mover para a direita", "Remover"]
+
+
+def test_overview_swaps_agents_card_for_exchange(window):
+    overview = window.dashboard("overview")
+    assert overview.exchange is None and overview.agents is not None
+    assert window.dashboard(window.workspace.agents[0].id).agents is None
+
+
+def test_agents_card_rows_and_range_link(window):
+    overview = window.dashboard("overview")
+    rows = overview.agents.list.rows()
+    assert [r["name"] for r in rows] == [a.name for a in window.workspace.agents]
+    assert sum(r["share"] for r in rows) == pytest.approx(1.0)
+    overview.total.set_range("1A")
+    assert overview.agents.list.range_key == "1A"
+
+
+def test_clicking_an_agent_opens_its_tab(window):
+    target = window.workspace.agents[1]
+    window.dashboard("overview").agents.agent_clicked.emit(target.id)
+    assert window.current == target.id
+
+
+def test_overview_decisions_carry_the_agent(window):
+    ws = window.workspace
+    decisions = ws.overview.decisions
+    assert decisions and all(d.agent in {a.id for a in ws.agents} for d in decisions)
+    assert decisions == sorted(decisions, key=lambda d: d.moment, reverse=True)
+
+
+def test_header_eye_and_gear(window):
+    from ubento import formatting
+
+    ws = window.workspace
+    try:
+        window.header.privacy_toggled.emit()
+        assert ws.pref("hide_values") and formatting.is_hidden()
+        assert window.header._hidden
+        window.header.privacy_toggled.emit()
+        assert not formatting.is_hidden()
+    finally:
+        formatting.set_hidden(False)
+    window.header.settings_requested.emit()
+    assert window.current == "settings"
+
+
+def test_default_range_pref_applies_to_every_page(window):
+    window.workspace.set_pref("default_range", "6M")
+    for key in ["overview"] + [a.id for a in window.workspace.agents]:
+        assert window.dashboard(key).total.range_key == "6M"

@@ -63,11 +63,11 @@ class SummaryCard(Card):
     def refresh(self) -> None:
         s = self.store
         top = max(s.spent, s.income) or 1
-        count = s.transfers_count()
+        count = s.decisions_count()
         self.rows.set_rows([
             ("Gastos", money(s.spent).rsplit(",", 1)[0], 0.75 * math.sqrt(s.spent / top), "#EC6D58"),
             ("Receitas", money(s.income).rsplit(",", 1)[0], 0.75 * math.sqrt(s.income / top), theme.GREEN),
-            ("Transferências", str(count), min(1.0, 0.75 * math.sqrt(count / 150)), theme.BLUE),
+            ("Decisões", str(count), min(1.0, 0.75 * math.sqrt(count / 150)), theme.BLUE),
         ])
 
 
@@ -102,7 +102,7 @@ class ActivityGrid(QWidget):
         if 0 <= r < len(self._weeks) and 0 <= c < 7:
             day, count = self._weeks[r][c]
             if day is not None and count is not None:
-                text = f"{day.day} de {MONTHS[day.month - 1]} · {count} transaç{'ão' if count == 1 else 'ões'}"
+                text = f"{day.day} de {MONTHS[day.month - 1]} · {count} decis{'ão' if count == 1 else 'ões'}"
                 QToolTip.showText(e.globalPosition().toPoint(), text, self)
                 return
         QToolTip.hideText()

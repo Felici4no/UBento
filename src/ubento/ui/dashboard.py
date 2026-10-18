@@ -1,4 +1,4 @@
-"""Painel de cards de um agente (ou do agregado "Geral")."""
+"""Painel de cards de um agente — ou, na aba Geral, a visão consolidada."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ..store import Store
-from .cards import ActivityCard, CoinCard, CryptoCard, ExchangeCard, SummaryCard, TotalCard, TransfersCard
+from ..workspace import Workspace
+from .cards import ActivityCard, AgentsCard, CoinCard, CryptoCard, DecisionsCard, ExchangeCard, SummaryCard, TotalCard
 
 GAP = 20
 NATURAL_HEIGHT = 944 + 56  # cards do modelo + margens; abaixo disso a página rola
@@ -15,19 +16,43 @@ NATURAL_WIDTH = 900
 
 class Dashboard(QWidget):
     notify = Signal(str, bool)
+    open_agent = Signal(str)
 
-    def __init__(self, store: Store, parent=None):
+    def __init__(self, store: Store, workspace: Workspace | None = None, parent=None):
+        """Com `workspace`, vira a aba Geral: o card Agentes ocupa o lugar do Swap."""
         super().__init__(parent)
         self.store = store
         self.setMinimumSize(NATURAL_WIDTH, NATURAL_HEIGHT)
+        overview = workspace is not None
+
+        def lookup(agent_id: str):
+            agent = workspace.agent(agent_id) if workspace else None
+            return (agent.name, agent.color) if agent else None
 
         self.crypto = CryptoCard(store)
         self.total = TotalCard(store)
         self.summary = SummaryCard(store)
         self.activity = ActivityCard(store)
-        self.exchange = ExchangeCard(store)
-        self.transfers = TransfersCard(store)
+        self.decisions = DecisionsCard(store, lookup if overview else None)
         self.coin = CoinCard(store)
+        self.exchange: ExchangeCard | None = None
+        self.agents: AgentsCard | None = None
+
+        if overview:
+            self.agents = AgentsCard(workspace)
+            self.agents.agent_clicked.connect(self.open_agent)
+            self.total.range_changed.connect(self.agents.set_range)
+            workspace.changed.connect(self.agents.refresh)
+            workspace.changed.connect(self.decisions.refresh)
+            store.changed.connect(self.agents.refresh)
+            bottom_left = self.agents
+            self.coin.buy_clicked.connect(lambda: self.notify.emit("Escolha um agente para comprar USDC", False))
+        else:
+            self.exchange = ExchangeCard(store)
+            self.exchange.notify.connect(self.notify)
+            bottom_left = self.exchange
+            self.coin.buy_clicked.connect(lambda: self.exchange.prefill("USD", "USDC"))
+        self.coin.receive_clicked.connect(lambda: self.notify.emit("Receber USDC estará disponível em breve", True))
 
         mid = QHBoxLayout()
         mid.setSpacing(GAP)
@@ -38,12 +63,12 @@ class Dashboard(QWidget):
         left.setSpacing(GAP)
         left.addWidget(self.crypto, 182)
         left.addLayout(mid, 252)
-        left.addWidget(self.exchange, 470)
+        left.addWidget(bottom_left, 470)
 
         right = QVBoxLayout()
         right.setSpacing(GAP)
         right.addWidget(self.total, 454)
-        right.addWidget(self.transfers, 267)
+        right.addWidget(self.decisions, 267)
         right.addWidget(self.coin, 183)
 
         grid = QHBoxLayout()
@@ -61,7 +86,3 @@ class Dashboard(QWidget):
         outer.addStretch(1)
         outer.addWidget(holder, 100)
         outer.addStretch(1)
-
-        self.exchange.notify.connect(self.notify)
-        self.coin.buy_clicked.connect(lambda: self.exchange.prefill("USD", "USDC"))
-        self.coin.receive_clicked.connect(lambda: self.notify.emit("Receber USDC estará disponível em breve", True))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QVariantAnimation
+from PySide6.QtCore import QPointF, QRectF, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QVBoxLayout, QWidget
 
@@ -143,6 +143,8 @@ class BarChart(QWidget):
 
 
 class TotalCard(Card):
+    range_changed = Signal(str)
+
     def __init__(self, store, parent=None):
         super().__init__(parent)
         self.store = store
@@ -184,6 +186,7 @@ class TotalCard(Card):
     def set_range(self, key: str) -> None:
         self.range_key = key
         self.refresh(animate=True)
+        self.range_changed.emit(key)
 
     def refresh(self, animate: bool) -> None:
         points = self.store.history(self.range_key)
