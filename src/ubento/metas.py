@@ -7,7 +7,7 @@ Nada aqui decide regra de negócio: isso é do núcleo. Aqui só se orquestra, p
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -16,8 +16,9 @@ from .nucleo.avaliacao.reproducao import MomentoMeta, ReproducaoMeta, ativacao_d
 from .nucleo.conciliacao.conciliador import conciliar
 from .nucleo.conciliacao.eventos import TipoEventoConciliacao
 from .nucleo.conciliacao.modelos import (
-    Cobertura, CoberturaExecucoes, Movimentacao, PoliticaConciliacao, RegistroExterno, SaldoObservado, VinculoManual,
+    Cobertura, CoberturaExecucoes, Movimentacao, PoliticaConciliacao, RegistroExterno, RevogacaoVinculo, SaldoObservado, VinculoManual,
 )
+from .nucleo.conciliacao.conciliador import id_do_vinculo
 from .nucleo.esquema import Avaliacao, EstadoMeta, Evento, Execucao, LadoExecucao, Meta, Modelo, Observacao
 from .nucleo.regras import Snapshot
 from .persistencia import Repositorio
@@ -42,7 +43,8 @@ NAO_AVALIADA, PENDENTE_DE_COMPROVACAO, COMPROVADA, REVERTIDA = "nao_avaliada", "
 class ExecucaoRegistrada:
     execucao: Execucao
     situacao: str
-    vinculo: VinculoManual | None = None  # decisão humana que ligou a execução a um registro externo depois
+    vinculo: VinculoManual | None = None  # vínculo manual VIGENTE (não revogado)
+    historico_vinculos: tuple[tuple[VinculoManual, RevogacaoVinculo | None], ...] = ()  # todos, na ordem, com a revogação de cada um
 
     @property
     def sem_referencia_externa(self) -> bool:
@@ -81,6 +83,13 @@ class PainelMeta:
         return self.proximo_momento < self.momentos_total
 
 
+@dataclass(frozen=True)
+class _Reivindicacao:
+    meta_id: str
+    execucao_id: str
+    alocada: Decimal | None  # None = o registro externo inteiro
+
+
 class ServicoMetas:
     def __init__(self, repositorio: Repositorio | None = None):
         self.repo = repositorio or Repositorio()
@@ -114,27 +123,57 @@ class ServicoMetas:
             original = next((o for o in existentes if o.id == execucao.estorna_execucao_id), None)
             if original is None or original.lado is not LadoExecucao.COMPRA:
                 raise ErroDeRegistro(f"o estorno aponta para {execucao.estorna_execucao_id}, que não é uma compra registrada nesta meta")
-        usadas = self._referencias_em_uso(meta_id)
         for r in execucao.referencias_externas:
-            outros = usadas.get((r.fonte_id, r.id_externo), [])
-            if any(alocada is None or r.quantidade_bruta_alocada is None for _, alocada in outros):
-                raise ErroDeRegistro(f"o registro externo {r.fonte_id}/{r.id_externo} já está vinculado a outra execução desta meta")
+            self._checar_exclusividade((r.fonte_id, r.id_externo), meta_id, execucao.id, r.quantidade_bruta_alocada)
         self.repo.registrar_entrada(meta_id, "execucoes", execucao)
         return True
 
-    def _referencias_em_uso(self, meta_id: str) -> dict[tuple[str, str], list[tuple[str, object]]]:
-        """(fonte, id externo) -> [(execução, alocação)] pelas referências declaradas E pelos vínculos manuais."""
-        uso: dict[tuple[str, str], list[tuple[str, object]]] = {}
-        for o in self.repo.entradas(meta_id, "execucoes", Execucao):
-            for r in o.referencias_externas:
-                uso.setdefault((r.fonte_id, r.id_externo), []).append((o.id, r.quantidade_bruta_alocada))
-        for v in self.repo.entradas(meta_id, "vinculos_manuais", VinculoManual):
-            uso.setdefault((v.fonte_id, v.id_externo), []).append((v.execucao_id, v.quantidade_bruta_alocada))
+    # -- exclusividade do registro externo (vale entre TODAS as metas do banco; ver docs/PERSISTENCIA_E_INTERFACE.md) ----------------
+
+    def _vinculos_ativos(self, meta_id: str) -> list[VinculoManual]:
+        revogados = {r.vinculo_id for r in self.repo.entradas(meta_id, "revogacoes_vinculos", RevogacaoVinculo)}
+        return [v for v in self.repo.entradas(meta_id, "vinculos_manuais", VinculoManual) if id_do_vinculo(v) not in revogados]
+
+    def _reivindicacoes(self) -> dict[tuple[str, str], list[_Reivindicacao]]:
+        """(fonte, id externo) -> quem o reivindica hoje: referências declaradas e vínculos manuais NÃO revogados, de todas as metas."""
+        uso: dict[tuple[str, str], list[_Reivindicacao]] = {}
+        for m in self.repo.metas_ids():
+            for o in self.repo.entradas(m, "execucoes", Execucao):
+                for r in o.referencias_externas:
+                    uso.setdefault((r.fonte_id, r.id_externo), []).append(_Reivindicacao(m, o.id, r.quantidade_bruta_alocada))
+            for v in self._vinculos_ativos(m):
+                uso.setdefault((v.fonte_id, v.id_externo), []).append(_Reivindicacao(m, v.execucao_id, v.quantidade_bruta_alocada))
         return uso
 
+    def _quantidade_do_registro(self, chave: tuple[str, str]) -> Decimal | None:
+        melhor: RegistroExterno | None = None
+        for m in self.repo.metas_ids():
+            for r in self.repo.entradas(m, "registros_externos", RegistroExterno):
+                if r.chave == chave and (melhor is None or r.versao >= melhor.versao):
+                    melhor = r
+        return melhor.quantidade if melhor else None
+
+    def _checar_exclusividade(self, chave: tuple[str, str], meta_id: str, execucao_id: str, alocada: Decimal | None) -> None:
+        """Uma compra real (fonte, id externo) é UM fato: nenhuma meta, de qualquer conta, pode contá-la duas vezes.
+
+        Reivindicação integral é exclusiva; reivindicações parciais convivem enquanto a soma das alocações couber na quantidade do registro.
+        """
+        outras = [c for c in self._reivindicacoes().get(chave, []) if (c.meta_id, c.execucao_id) != (meta_id, execucao_id)]
+        if not outras:
+            return
+        quantidade = self._quantidade_do_registro(chave)
+        integral = alocada is None or any(c.alocada is None for c in outras)
+        excede = quantidade is not None and sum((c.alocada or Decimal(0) for c in outras), Decimal(0)) + (alocada or Decimal(0)) > quantidade
+        if integral or excede:
+            dono = outras[0]
+            onde = "desta meta" if dono.meta_id == meta_id else f"da meta {dono.meta_id}"
+            raise ErroDeRegistro(
+                f"o registro externo {chave[0]}/{chave[1]} já está vinculado a outra execução {onde} ({dono.execucao_id}): a mesma compra não pode ser contada duas vezes"
+            )
+
     def registros_disponiveis(self, meta_id: str) -> list[RegistroExterno]:
-        """Registros externos importados que ainda não pertencem a nenhuma execução da meta (candidatos a vínculo manual), última versão de cada."""
-        uso = self._referencias_em_uso(meta_id)
+        """Registros externos importados nesta meta que ainda não pertencem a nenhuma execução de NENHUMA meta (candidatos a vínculo), última versão de cada."""
+        uso = self._reivindicacoes()
         ultimos: dict[tuple[str, str], RegistroExterno] = {}
         for r in self.repo.entradas(meta_id, "registros_externos", RegistroExterno):
             if r.chave not in uso and (r.chave not in ultimos or r.versao >= ultimos[r.chave].versao):
@@ -158,15 +197,72 @@ class ServicoMetas:
             raise ErroDeRegistro(f"o registro externo {fonte_id}/{id_externo} ainda não foi importado: importe a evidência primeiro")
         if any((r.fonte_id, r.id_externo) == (fonte_id, id_externo) for r in execucao.referencias_externas):
             return False  # a execução já declarava essa referência
-        usados = self._referencias_em_uso(meta_id).get((fonte_id, id_externo), [])
-        if any(dono == execucao_id for dono, _ in usados):
-            return False  # mesmo vínculo já registrado: nada se duplica
-        if usados:
-            raise ErroDeRegistro(f"o registro externo {fonte_id}/{id_externo} já está vinculado a outra execução desta meta ({usados[0][0]})")
+        if any((c.meta_id, c.execucao_id) == (meta_id, execucao_id) for c in self._reivindicacoes().get((fonte_id, id_externo), [])):
+            return False  # mesmo vínculo já vigente: nada se duplica
+        self._checar_exclusividade((fonte_id, id_externo), meta_id, execucao_id, None)
         ultima = self.repo.ultima_avaliacao(meta_id)
         em = max(i for i in (ultima[0].avaliada_em if ultima else None, execucao.confirmada_em, *(r.recebido_em for r in registros)) if i is not None)
         vinculo = VinculoManual(execucao_id=execucao_id, fonte_id=fonte_id, id_externo=id_externo, autor=autor.strip(), justificativa=justificativa.strip(), em=em)
         self.repo.registrar_entrada(meta_id, "vinculos_manuais", vinculo)
+        self.reavaliar(meta_id, em)
+        return True
+
+    # -- correção auditável de vínculos manuais ---------------------------------------------------------------------------------------
+
+    def _vinculo_vigente(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str) -> VinculoManual | None:
+        return next((v for v in sorted(self._vinculos_ativos(meta_id), key=lambda v: v.em, reverse=True)
+                     if (v.execucao_id, v.fonte_id, v.id_externo) == (execucao_id, fonte_id, id_externo)), None)
+
+    def _exigir_execucao(self, meta_id: str, execucao_id: str) -> Execucao:
+        self.repo.carregar_meta(meta_id)
+        execucao = next((e for e in self.repo.entradas(meta_id, "execucoes", Execucao) if e.id == execucao_id), None)
+        if execucao is None:
+            raise ErroDeRegistro(f"a execução {execucao_id} não está registrada nesta meta")
+        return execucao
+
+    def _instante_da_correcao(self, meta_id: str, original: VinculoManual) -> datetime:
+        """Estritamente depois do vínculo corrigido (a correção nunca reescreve o instante em que ele valia) e nunca antes da última avaliação."""
+        ultima = self.repo.ultima_avaliacao(meta_id)
+        return max(ultima[0].avaliada_em if ultima else original.em, original.em + timedelta(seconds=1))
+
+    def revogar_vinculo(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str, autor: str, justificativa: str) -> bool:
+        """Retira um vínculo manual vigente (porque estava incorreto). O vínculo original é PRESERVADO; a revogação entra no histórico
+        com autor, justificativa e instante. Não cria execução nem estorno: só desfaz a correspondência. A conciliação e o estado são
+        recalculados pelos mecanismos de sempre (prova contradita vira reversão compensatória; meta atingida segue o caminho de `reconciliada`).
+        Devolve False se o vínculo já estava revogado (repetição)."""
+        self._exigir_execucao(meta_id, execucao_id)
+        alvo = self._vinculo_vigente(meta_id, execucao_id, fonte_id, id_externo)
+        if alvo is None:
+            if any((v.execucao_id, v.fonte_id, v.id_externo) == (execucao_id, fonte_id, id_externo) for v in self.repo.entradas(meta_id, "vinculos_manuais", VinculoManual)):
+                return False
+            raise ErroDeRegistro(f"não há vínculo manual de {execucao_id} com {fonte_id}/{id_externo} (uma referência declarada no próprio registro da execução não é revogável aqui)")
+        em = self._instante_da_correcao(meta_id, alvo)
+        revogacao = RevogacaoVinculo(vinculo_id=id_do_vinculo(alvo), autor=autor.strip(), justificativa=justificativa.strip(), em=em)
+        self.repo.registrar_entrada(meta_id, "revogacoes_vinculos", revogacao)
+        self.reavaliar(meta_id, em)
+        return True
+
+    def substituir_vinculo(self, meta_id: str, execucao_id: str, fonte_antigo: str, id_antigo: str, fonte_novo: str, id_novo: str,
+                           autor: str, justificativa: str) -> bool:
+        """Troca o vínculo vigente por outro registro externo: revogação + novo vínculo, gravados juntos (uma transação) e ligados entre si
+        (`substituido_por_id`). Valem as mesmas regras de exclusividade do vínculo novo. Devolve False se a troca já foi feita."""
+        self._exigir_execucao(meta_id, execucao_id)
+        antigo = self._vinculo_vigente(meta_id, execucao_id, fonte_antigo, id_antigo)
+        if antigo is None:
+            if self._vinculo_vigente(meta_id, execucao_id, fonte_novo, id_novo) is not None:
+                return False  # a substituição já aconteceu
+            raise ErroDeRegistro(f"não há vínculo manual vigente de {execucao_id} com {fonte_antigo}/{id_antigo} para substituir")
+        if (fonte_antigo, id_antigo) == (fonte_novo, id_novo):
+            raise ErroDeRegistro("o novo registro externo é o mesmo do vínculo atual: escolha outro (ou revogue)")
+        registros = [r for r in self.repo.entradas(meta_id, "registros_externos", RegistroExterno) if r.chave == (fonte_novo, id_novo)]
+        if not registros:
+            raise ErroDeRegistro(f"o registro externo {fonte_novo}/{id_novo} ainda não foi importado: importe a evidência primeiro")
+        self._checar_exclusividade((fonte_novo, id_novo), meta_id, execucao_id, None)
+        em = max(self._instante_da_correcao(meta_id, antigo), *(r.recebido_em for r in registros))
+        novo = VinculoManual(execucao_id=execucao_id, fonte_id=fonte_novo, id_externo=id_novo, autor=autor.strip(), justificativa=justificativa.strip(), em=em)
+        revogacao = RevogacaoVinculo(vinculo_id=id_do_vinculo(antigo), autor=autor.strip(), justificativa=justificativa.strip(), em=em,
+                                     substituido_por_id=id_do_vinculo(novo))
+        self.repo.registrar_entradas(meta_id, [("revogacoes_vinculos", revogacao), ("vinculos_manuais", novo)])
         self.reavaliar(meta_id, em)
         return True
 
@@ -189,17 +285,51 @@ class ServicoMetas:
 
     # -- avaliação ------------------------------------------------------------------------------------------------------
 
+    def _insumos_conjuntos(self, meta_id: str, ocultar: tuple[str, ...]):
+        """Entradas da conciliação: as da meta + as execuções (e vínculos) das OUTRAS metas, para que o núcleo enxergue uma mesma compra
+        reivindicada duas vezes (vira revisão nas duas, nunca progresso em dobro). Os ids das outras metas ganham prefixo: o núcleo trata
+        o id da execução como global e metas diferentes podem repetir ids. Das outras metas entram só os registros externos que elas reivindicam."""
+        r = self.repo
+        execucoes = list(r.entradas(meta_id, "execucoes", Execucao))
+        externos = [x for x in r.entradas(meta_id, "registros_externos", RegistroExterno) if x.id_externo not in ocultar]
+        vinculos = list(r.entradas(meta_id, "vinculos_manuais", VinculoManual))
+        revogacoes = list(r.entradas(meta_id, "revogacoes_vinculos", RevogacaoVinculo))
+        coberturas = list(r.entradas(meta_id, "coberturas_execucoes", CoberturaExecucoes))
+        for outra in r.metas_ids():
+            if outra == meta_id:
+                continue
+            execs = r.entradas(outra, "execucoes", Execucao)
+            if not execs:
+                continue
+            pre = f"{outra}::"
+            execucoes += [e.model_copy(update={"id": pre + e.id, "estorna_execucao_id": pre + e.estorna_execucao_id if e.estorna_execucao_id else None}) for e in execs]
+            novos_ids: dict[str, str] = {}
+            vinculos_outra = []
+            for v in r.entradas(outra, "vinculos_manuais", VinculoManual):
+                v2 = v.model_copy(update={"execucao_id": pre + v.execucao_id})
+                novos_ids[id_do_vinculo(v)] = id_do_vinculo(v2)
+                vinculos_outra.append(v2)
+            vinculos += vinculos_outra
+            for rv in r.entradas(outra, "revogacoes_vinculos", RevogacaoVinculo):
+                revogacoes.append(rv.model_copy(update={
+                    "vinculo_id": novos_ids.get(rv.vinculo_id, rv.vinculo_id),
+                    "substituido_por_id": novos_ids.get(rv.substituido_por_id, rv.substituido_por_id) if rv.substituido_por_id else None,
+                }))
+            chaves = {(x.fonte_id, x.id_externo) for e in execs for x in e.referencias_externas} | {(v.fonte_id, v.id_externo) for v in vinculos_outra}
+            externos += [x for x in r.entradas(outra, "registros_externos", RegistroExterno) if x.chave in chaves]
+            coberturas += r.entradas(outra, "coberturas_execucoes", CoberturaExecucoes)
+        return execucoes, externos, vinculos, revogacoes, coberturas
+
     def avaliar(self, meta_id: str, agora: datetime, ocultar: tuple[str, ...] = ()) -> ResultadoAvaliacao:
         meta, ativacao = self.repo.carregar_meta(meta_id)
         r = self.repo
-        externos = [x for x in r.entradas(meta_id, "registros_externos", RegistroExterno) if x.id_externo not in ocultar]
+        execucoes, externos, vinculos, revogacoes, coberturas_execucoes = self._insumos_conjuntos(meta_id, ocultar)
         politica = r.entradas(meta_id, "politica_conciliacao", PoliticaConciliacao)[0]
         relatorio = conciliar(
-            r.entradas(meta_id, "execucoes", Execucao), externos, politica=politica, agora=agora,
+            execucoes, externos, politica=politica, agora=agora,
             movimentacoes=r.entradas(meta_id, "movimentacoes", Movimentacao), saldos=r.entradas(meta_id, "saldos", SaldoObservado),
-            coberturas=r.entradas(meta_id, "coberturas", Cobertura),
-            coberturas_execucoes=r.entradas(meta_id, "coberturas_execucoes", CoberturaExecucoes),
-            vinculos=r.entradas(meta_id, "vinculos_manuais", VinculoManual),
+            coberturas=r.entradas(meta_id, "coberturas", Cobertura), coberturas_execucoes=coberturas_execucoes,
+            vinculos=vinculos, revogacoes=revogacoes,
         )
         snapshot = Snapshot(observacoes=tuple(o for o in r.entradas(meta_id, "observacoes", Observacao) if o.coletado_em <= agora))
         resultado = avaliar_meta(meta, ativacao, r.eventos(meta_id), r.razao(meta_id), relatorio, snapshot, agora)
@@ -229,6 +359,7 @@ class ServicoMetas:
         pendentes = {pe.referencia for pe in ultima[1].completude.pendencias} if ultima else set()
         registradas = []
         vinculos = self.repo.entradas(meta_id, "vinculos_manuais", VinculoManual)
+        revogacoes = {rv.vinculo_id: rv for rv in self.repo.entradas(meta_id, "revogacoes_vinculos", RevogacaoVinculo)}
         for ex in self.repo.entradas(meta_id, "execucoes", Execucao):
             eventos_ex = [e for e in razao if e.alvo == ex.id]
             if eventos_ex and eventos_ex[-1].tipo is TipoEventoConciliacao.EXECUCAO_CONCILIADA:
@@ -239,7 +370,9 @@ class ServicoMetas:
                 situacao = PENDENTE_DE_COMPROVACAO
             else:
                 situacao = NAO_AVALIADA
-            registradas.append(ExecucaoRegistrada(ex, situacao, next((v for v in reversed(vinculos) if v.execucao_id == ex.id), None)))
+            historico = tuple((v, revogacoes.get(id_do_vinculo(v))) for v in vinculos if v.execucao_id == ex.id)
+            vigente = next((v for v, rv in reversed(historico) if rv is None), None)
+            registradas.append(ExecucaoRegistrada(ex, situacao, vigente, historico))
         return PainelMeta(
             meta_id=meta_id, descricao=self.repo.descricao(meta_id), agente_id=self.repo.agente_da_meta(meta_id),
             estado=ultima[0].estado if ultima else None, avaliacao=ultima[0] if ultima else None, progresso=ultima[1] if ultima else None,

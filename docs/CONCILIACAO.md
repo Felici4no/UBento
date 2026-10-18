@@ -161,3 +161,7 @@ o prazo original.
 - Alocação proporcional da taxa assume que a taxa do registro é distribuída pela quantidade; fontes que cobram taxa mínima por registro podem exigir `VinculoManual` ou tolerância.
 - O fuso e o relógio entram sempre como parâmetro (`agora`); este módulo nunca lê o horário do sistema.
 - Candidatos sugeridos são heurísticos e só servem para orientar uma pessoa.
+
+## 10. Revogação de vínculo manual
+
+`RevogacaoVinculo` corrige um `VinculoManual` sem apagá-lo: guarda `vinculo_id` (hash do conteúdo do vínculo, `id_do_vinculo`), autor, justificativa (mínimo 10 caracteres), instante `em` e, numa substituição, `substituido_por_id`. `conciliar(..., revogacoes=...)` usa `vinculos_vigentes`: um vínculo vale em `agora` se já foi decidido e não foi revogado em instante posterior ao dele e `<= agora`. Efeitos: reproduzir um instante anterior à revogação reproduz o resultado de então; revogação anterior ou igual ao instante do vínculo é ignorada; o hash das entradas só inclui revogações quando existem (relatórios sem elas mantêm o hash de antes). Sem o vínculo, a execução volta a depender de referência declarada ou de novo vínculo.

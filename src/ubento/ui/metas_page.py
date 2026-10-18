@@ -23,6 +23,7 @@ from . import theme
 from .components import ActionButton, Card, Label, PillButton, setup
 from .controls import Chip
 from .execucao_dialog import ExecucaoDialog
+from .correcao_dialog import CorrecaoVinculoDialog
 from .vinculo_dialog import VinculoDialog
 
 W = theme.W
@@ -245,6 +246,30 @@ class MetasPage(QWidget):
         self.refresh()
         return nova
 
+    def criar_correcao(self, execucao_id: str) -> CorrecaoVinculoDialog | None:
+        if self.meta_id is None:
+            return None
+        registrada = next((r for r in self.servico.painel(self.meta_id).execucoes if r.execucao.id == execucao_id), None)
+        if registrada is None or registrada.vinculo is None:
+            return None
+        return CorrecaoVinculoDialog(registrada, self.servico.registros_disponiveis(self.meta_id),
+                                     lambda acao, fonte, ident, autor, just: self._gravar_correcao(registrada, acao, fonte, ident, autor, just), self)
+
+    def _corrigir(self, execucao_id: str) -> None:
+        dialogo = self.criar_correcao(execucao_id)
+        if dialogo is not None:
+            dialogo.exec()
+
+    def _gravar_correcao(self, registrada, acao: str, fonte: str | None, id_externo: str | None, autor: str, justificativa: str) -> bool:
+        v = registrada.vinculo
+        if acao == "substituir":
+            feito = self.servico.substituir_vinculo(self.meta_id, registrada.execucao.id, v.fonte_id, v.id_externo, fonte, id_externo, autor, justificativa)
+        else:
+            feito = self.servico.revogar_vinculo(self.meta_id, registrada.execucao.id, v.fonte_id, v.id_externo, autor, justificativa)
+        self.notify.emit("Correção registrada no histórico. A conciliação recalculou a prova" if feito else "Esta correção já estava registrada. Nada foi duplicado", True)
+        self.refresh()
+        return feito
+
     def _importar_evidencia(self) -> None:
         caminho, _ = QFileDialog.getOpenFileName(self, "Importar evidência externa", "", "Evidência (*.yaml *.yml *.json)")
         if caminho:
@@ -438,12 +463,21 @@ class MetasPage(QWidget):
                 botao = ActionButton("Vincular…", height=30, pad=14)
                 botao.clicked.connect(lambda _=False, i=e.id: self._vincular(i))
                 h.addWidget(botao)
+            elif r.vinculo is not None:
+                botao = ActionButton("Corrigir…", height=30, pad=14)
+                botao.clicked.connect(lambda _=False, i=e.id: self._corrigir(i))
+                h.addWidget(botao)
             h.addWidget(Chip(rotulo, cor))
             v.addWidget(linha)
             if r.sem_referencia_externa:
                 v.addWidget(_texto("Sem referência externa: não pode ser comprovada até ser vinculada a um registro externo.", theme.WARNING))
-            elif r.vinculo is not None:
-                v.addWidget(_texto(f"Vinculada a {r.vinculo.fonte_id}/{r.vinculo.id_externo} por {r.vinculo.autor} em {r.vinculo.em:%d/%m %H:%M} UTC: {r.vinculo.justificativa}", theme.MUTED))
+            for vinculo, revogacao in r.historico_vinculos:  # a trilha completa: o vínculo original nunca some
+                texto = f"Vínculo a {vinculo.fonte_id}/{vinculo.id_externo} por {vinculo.autor} em {vinculo.em:%d/%m %H:%M} UTC: {vinculo.justificativa}"
+                if revogacao is None:
+                    v.addWidget(_texto(texto, theme.MUTED))
+                else:
+                    como = "substituído" if revogacao.substituido_por_id else "revogado"
+                    v.addWidget(_texto(f"{texto}  →  {como} por {revogacao.autor} em {revogacao.em:%d/%m %H:%M} UTC: {revogacao.justificativa}", theme.DIM))
         return card
 
     def _historia(self, painel: PainelMeta) -> QWidget:

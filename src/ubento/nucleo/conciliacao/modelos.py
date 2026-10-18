@@ -156,6 +156,21 @@ class VinculoManual(Modelo):
     em: Instante
 
 
+class RevogacaoVinculo(Modelo):
+    """Correção AUDITÁVEL de um vínculo manual: o vínculo original é preservado e deixa de valer a partir de `em`.
+
+    Não cria execução nem estorno: só retira a correspondência decidida por um humano. `substituido_por_id` aponta para o
+    vínculo que passa a valer no lugar (substituição); vazio = revogação simples. A identidade do vínculo é o hash do seu conteúdo
+    (`id_do_vinculo`), então uma revogação nunca se aplica a outro vínculo.
+    """
+
+    vinculo_id: HashHex
+    autor: Texto
+    justificativa: Annotated[Texto, Field(min_length=10)]
+    em: Instante
+    substituido_por_id: HashHex | None = None
+
+
 class Movimentacao(Modelo):
     fonte_id: Identificador
     id_externo: Identificador

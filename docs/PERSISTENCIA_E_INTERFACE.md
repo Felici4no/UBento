@@ -50,7 +50,20 @@ Uma execução registrada sem fonte/id externo não pode ser comprovada e aparec
 - **Histórico:** a execução não é editada; o vínculo é acrescentado (append-only) e a meta é reavaliada num instante de referência (nunca o relógio do sistema). Eventos e razão anteriores permanecem; a comprovação entra como evento novo.
 - **Duplicidade:** repetir o mesmo vínculo não grava nada; um registro externo não pode pertencer a duas execuções da meta (nem por vínculo, nem por referência declarada no formulário); registro não importado ou execução inexistente são recusados.
 - **Quem comprova continua sendo a conciliação:** o vínculo só diz qual registro corresponde. Quantidade, ativo, taxas e horários ainda são conferidos; se não baterem, nada é comprovado.
-- **Não há desvincular:** corrigir um vínculo errado exige um novo registro/estorno (lacuna conhecida e deliberada nesta fase).
+
+### Corrigir um vínculo manual (revogar ou substituir)
+- **Preserva o original.** O vínculo nunca é apagado nem editado: a correção é uma `RevogacaoVinculo` acrescentada ao histórico, com **autor, justificativa (mínimo 10 caracteres) e instante**, apontando para o vínculo pelo hash do conteúdo (`id_do_vinculo`). Numa **substituição**, a revogação e o novo vínculo são gravados juntos, numa transação, e a revogação traz `substituido_por_id`.
+- **Não cria execução nem estorno financeiro.** Só retira ou troca a correspondência. A conciliação e o estado são recalculados pelos mecanismos de sempre: a prova que deixa de valer vira **reversão compensatória no razão** (contradição positiva), e, se a meta já estava atingida, o caminho é o do evento `reconciliada`, que mantém a conclusão antiga na história. As avaliações anteriores permanecem.
+- **Instante.** A correção vale a partir de um instante estritamente posterior ao do vínculo (nunca antes da última avaliação, nunca o relógio do sistema). Reproduzir um instante anterior à correção devolve o mundo como era; a revogação não retroage.
+- **Repetição.** Pedir de novo a mesma revogação ou substituição não grava nada. Depois de revogado, a execução volta a poder receber um vínculo (o novo vínculo é outro registro, com outro conteúdo).
+- **Recusas.** Não se revoga uma referência declarada no próprio registro da execução (só vínculos manuais); substituir exige registro já importado e livre pela regra abaixo.
+
+### Regra de exclusividade do registro externo (vale entre TODAS as metas)
+Uma compra real, identificada por `(fonte, id externo)`, é **um único fato**. Nenhuma meta, **de qualquer conta**, pode contá-la duas vezes:
+- A reivindicação **integral** (sem alocação) é exclusiva do banco inteiro. Reivindicações **parciais** (`quantidade_bruta_alocada`) convivem entre metas enquanto a **soma não exceder a quantidade do registro**.
+- A conta da meta **não** é critério de exclusividade: o id da fonte já identifica a compra, e uma meta de outra conta reivindicando-a é um conflito a recusar, não uma permissão. (A conta continua valendo só para o escopo de órfãos.)
+- **Aplicação.** (1) Ao registrar uma execução com referência e ao vincular/substituir, o serviço recusa a duplicidade, inclusive entre metas (“da meta X”). Revogar libera o registro. (2) Como rede de segurança (cenários importados, escrita concorrente), a avaliação concilia **todas as metas juntas**: o núcleo marca a mesma compra reivindicada duas vezes como revisão nas duas, sem progresso em dobro. Os ids de execução das outras metas ganham prefixo, porque o núcleo trata o id como global.
+- **Antes** desta regra a exclusividade valia só dentro de cada meta, o que deixava a mesma compra contar duas vezes em metas diferentes.
 
 ## 5. Onde fica o banco
 

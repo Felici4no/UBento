@@ -19,7 +19,7 @@ from ..tipos import formatar_instante, normalizar_decimal
 from .modelos import (
     INFORMATIVOS, Cobertura, CoberturaExecucoes, Confirmacao, CustoPorAtivo, Diferenca, GastoPorAtivo, Motivo, Movimentacao, PoliticaConciliacao,
     ProgressoMeta, RefResolvida, RegistroExterno, RelatorioConciliacao, ResultadoExecucao, ResultadoExterno,
-    SaldoObservado, StatusConciliacao, StatusRegistroExterno, VinculoManual,
+    RevogacaoVinculo, SaldoObservado, StatusConciliacao, StatusRegistroExterno, VinculoManual,
 )
 from .saldos import conciliar_saldos
 
@@ -411,15 +411,44 @@ def _progresso(resultados: Sequence[ResultadoExecucao], unicas: dict[str, Execuc
 # -- API -----------------------------------------------------------------------------------------------------------------------------------
 
 
-def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, saldos, coberturas, coberturas_execucoes, vinculos) -> str:
+DOMINIO_VINCULO = "ubento.vinculo.v1"
+
+
+def id_do_vinculo(vinculo: VinculoManual) -> str:
+    """Identidade de um vínculo manual: o hash do seu conteúdo (autor, justificativa e instante inclusos)."""
+    return hash_canonico(vinculo, DOMINIO_VINCULO)
+
+
+def vinculos_vigentes(vinculos: Sequence[VinculoManual], revogacoes: Sequence[RevogacaoVinculo], agora: datetime) -> list[VinculoManual]:
+    """Vínculos que valem em `agora`: já decididos e não revogados. Uma revogação só vale a partir do seu próprio instante,
+    então reproduzir um instante anterior à correção devolve o mundo como ele era (e uma revogação não retroage ao vínculo)."""
+    revogado_em: dict[str, datetime] = {}
+    for r in revogacoes:
+        if r.em <= agora:
+            revogado_em[r.vinculo_id] = min(r.em, revogado_em.get(r.vinculo_id, r.em))
+    saida = []
+    for v in vinculos:
+        if v.em > agora:
+            continue
+        quando = revogado_em.get(id_do_vinculo(v))
+        if quando is not None and quando > v.em:
+            continue
+        saida.append(v)
+    return saida
+
+
+def hash_das_entradas(*, agora, politica, execucoes, externos, movimentacoes, saldos, coberturas, coberturas_execucoes, vinculos, revogacoes=()) -> str:
     def lote(itens):
         return sorted(json_canonico(i) for i in itens)
 
-    return hash_canonico({
+    entradas = {
         "agora": agora, "politica": politica, "execucoes": lote(execucoes), "externos": lote(externos),
         "movimentacoes": lote(movimentacoes), "saldos": lote(saldos), "coberturas": lote(coberturas),
         "coberturas_execucoes": lote(coberturas_execucoes), "vinculos": lote(vinculos),
-    }, DOMINIO_ENTRADAS)
+    }
+    if revogacoes:  # só entra quando existe: relatórios sem revogação mantêm exatamente o mesmo hash de antes
+        entradas["revogacoes"] = lote(revogacoes)
+    return hash_canonico(entradas, DOMINIO_ENTRADAS)
 
 
 def conciliar(
@@ -433,15 +462,16 @@ def conciliar(
     coberturas: Sequence[Cobertura] = (),
     coberturas_execucoes: Sequence[CoberturaExecucoes] = (),
     vinculos: Sequence[VinculoManual] = (),
+    revogacoes: Sequence[RevogacaoVinculo] = (),
 ) -> RelatorioConciliacao:
     """Concilia o que era conhecido em `agora`. Mesmas entradas e mesmo `agora` → mesmo relatório (mesmo hash)."""
     hash_entradas = hash_das_entradas(agora=agora, politica=politica, execucoes=execucoes, externos=externos,
                                       movimentacoes=movimentacoes, saldos=saldos, coberturas=coberturas,
-                                      coberturas_execucoes=coberturas_execucoes, vinculos=vinculos)
+                                      coberturas_execucoes=coberturas_execucoes, vinculos=vinculos, revogacoes=revogacoes)
     # só existe o que já tinha chegado em `agora`
     execucoes_v = [e for e in execucoes if e.confirmada_em <= agora]
     externos_v = [r for r in externos if r.recebido_em <= agora]
-    vinculos_v = [v for v in vinculos if v.em <= agora]
+    vinculos_v = vinculos_vigentes(vinculos, revogacoes, agora)
     coberturas_v = [c for c in coberturas_execucoes if c.consultada_em <= agora]
 
     unicas, duplicadas, conflitantes_int = _unicas(execucoes_v)

@@ -56,6 +56,10 @@ CAMPOS_ENTRADA = (
 )
 
 
+# o que pode ser acrescentado depois da importação: as entradas do cenário + as revogações de vínculos manuais
+TIPOS_REGISTRAVEIS = (*CAMPOS_ENTRADA, "revogacoes_vinculos")
+
+
 class ErroDePersistencia(RuntimeError):
     pass
 
@@ -127,20 +131,29 @@ class Repositorio:
     def registrar_entrada(self, meta_id: str, tipo: str, item: Modelo) -> bool:
         """Acrescenta UMA entrada nova (ex.: uma execução confirmada manualmente). Nunca altera as existentes.
         Registrar o mesmo conteúdo de novo não faz nada. Devolve se gravou."""
+        return self.registrar_entradas(meta_id, [(tipo, item)])[0]
+
+    def registrar_entradas(self, meta_id: str, itens: list[tuple[str, Modelo]]) -> list[bool]:
+        """Acrescenta várias entradas NUMA transação (ou todas, ou nenhuma). Conteúdo já registrado é ignorado (False)."""
         from ..nucleo.canonico import hash_canonico
 
-        if tipo not in CAMPOS_ENTRADA:
-            raise ErroDePersistencia(f"tipo de entrada desconhecido: {tipo}")
-        conteudo = hash_canonico(item, "ubento.entrada.v1")
+        for tipo, _ in itens:
+            if tipo not in TIPOS_REGISTRAVEIS:
+                raise ErroDePersistencia(f"tipo de entrada desconhecido: {tipo}")
+        gravou = []
         with self.con:
-            if self.con.execute("SELECT 1 FROM entradas WHERE meta_id = ? AND tipo = ? AND hash LIKE ?", (meta_id, tipo, f"%:{conteudo}")).fetchone():
-                return False
-            n = self.con.execute("SELECT COUNT(*) FROM entradas WHERE meta_id = ? AND tipo = ?", (meta_id, tipo)).fetchone()[0]
-            self.con.execute(
-                "INSERT INTO entradas (meta_id, tipo, hash, dados) VALUES (?,?,?,?)",
-                (meta_id, tipo, f"manual{n:06d}:{conteudo}", item.model_dump_json()),
-            )
-        return True
+            for tipo, item in itens:
+                conteudo = hash_canonico(item, "ubento.entrada.v1")
+                if self.con.execute("SELECT 1 FROM entradas WHERE meta_id = ? AND tipo = ? AND hash LIKE ?", (meta_id, tipo, f"%:{conteudo}")).fetchone():
+                    gravou.append(False)
+                    continue
+                n = self.con.execute("SELECT COUNT(*) FROM entradas WHERE meta_id = ? AND tipo = ?", (meta_id, tipo)).fetchone()[0]
+                self.con.execute(
+                    "INSERT INTO entradas (meta_id, tipo, hash, dados) VALUES (?,?,?,?)",
+                    (meta_id, tipo, f"manual{n:06d}:{conteudo}", item.model_dump_json()),
+                )
+                gravou.append(True)
+        return gravou
 
     def metas_ids(self) -> list[str]:
         return [r["meta_id"] for r in self.con.execute("SELECT meta_id FROM metas ORDER BY rowid")]
