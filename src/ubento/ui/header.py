@@ -1,4 +1,8 @@
-"""Header fixo: marca + abas (Geral e um agente por aba) + botão de novo agente."""
+"""Header fixo: marca + abas (Geral e um agente por aba) + botão de novo agente.
+
+Numa janela sem moldura o header também é a barra da janela: arrastar pelo espaço vazio move a janela, duplo clique alterna maximizar e,
+no canto, ficam minimizar, maximizar/restaurar e fechar.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,9 @@ W = theme.W
 HEIGHT = 72
 TAB_H = 38
 PAD_X = 32
+CTRL_W, CTRL_H, CTRL_GAP, CTRL_MARGEM = 42, 36, 2, 10  # botões da janela
+CONTROLES = ("min", "max", "close")
+HITS_FIXOS = ("+", "gear", "eye", *CONTROLES)
 
 
 @dataclass(frozen=True)
@@ -33,6 +40,10 @@ class TabHeader(QWidget):
     reordered = Signal(str, int)  # (chave do agente, novo índice entre os agentes)
     settings_requested = Signal()
     privacy_toggled = Signal()
+    drag_requested = Signal()  # arrastar a janela (só com janela sem moldura)
+    minimize_requested = Signal()
+    maximize_requested = Signal()  # alterna maximizar/restaurar
+    close_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,6 +55,8 @@ class TabHeader(QWidget):
         self._font = theme.font(15, W.Medium)
         self._greeting = ""
         self._hidden = False
+        self._controles = False  # janela sem moldura: o header desenha minimizar/maximizar/fechar
+        self._maximizada = False
         self.animate = True
         self._appear: dict[str, float] = {}
         self._anims: dict[str, QVariantAnimation] = {}
@@ -88,6 +101,14 @@ class TabHeader(QWidget):
         self._hidden = hidden
         self.update()
 
+    def set_window_controls(self, ativos: bool) -> None:
+        self._controles = ativos
+        self.update()
+
+    def set_maximized(self, maximizada: bool) -> None:
+        self._maximizada = maximizada
+        self.update()
+
     def set_current(self, key: str) -> None:
         self._current = key
         self.update()
@@ -122,17 +143,30 @@ class TabHeader(QWidget):
     def _greeting_width(self) -> float:
         return QFontMetrics(theme.font(14, W.Normal)).horizontalAdvance(self._greeting) if self._greeting else 0.0
 
+    def _controles_largura(self) -> float:
+        return (len(CONTROLES) * CTRL_W + (len(CONTROLES) - 1) * CTRL_GAP + CTRL_MARGEM + 16) if self._controles else 0.0
+
+    def _controles_rects(self) -> dict[str, QRectF]:
+        if not self._controles:
+            return {}
+        y = (HEIGHT - CTRL_H) / 2
+        x = self.width() - CTRL_MARGEM - len(CONTROLES) * CTRL_W - (len(CONTROLES) - 1) * CTRL_GAP
+        return {nome: QRectF(x + i * (CTRL_W + CTRL_GAP), y, CTRL_W, CTRL_H) for i, nome in enumerate(CONTROLES)}
+
     def _right_width(self) -> float:
         greet = self._greeting_width()
-        return PAD_X + TAB_H * 2 + 8 + (greet + 16 if greet else 0)
+        return PAD_X + TAB_H * 2 + 8 + (greet + 16 if greet else 0) + self._controles_largura() - (PAD_X if self._controles else 0)
 
     def _right_rects(self) -> tuple[QRectF, QRectF]:
         y = (HEIGHT - TAB_H) / 2
-        gear = QRectF(self.width() - PAD_X - TAB_H, y, TAB_H, TAB_H)
+        gear = QRectF(self.width() - (0 if self._controles else PAD_X) - TAB_H - self._controles_largura(), y, TAB_H, TAB_H)
         eye = QRectF(gear.left() - 8 - TAB_H, y, TAB_H, TAB_H)
         return eye, gear
 
     def _hit(self, pos: QPointF) -> str | None:
+        for nome, r in self._controles_rects().items():
+            if r.contains(pos):
+                return nome
         eye, gear = self._right_rects()
         if gear.contains(pos):
             return "gear"
@@ -157,15 +191,27 @@ class TabHeader(QWidget):
                 self.settings_requested.emit()
             elif hit == "eye":
                 self.privacy_toggled.emit()
+            elif hit == "min":
+                self.minimize_requested.emit()
+            elif hit == "max":
+                self.maximize_requested.emit()
+            elif hit == "close":
+                self.close_requested.emit()
             elif hit:
                 self._press, self._dragging = (hit, e.position()), False
                 self.selected.emit(hit)
+            elif self._controles:  # espaço vazio de uma janela sem moldura: é a barra de título
+                self.drag_requested.emit()
         elif e.button() == Qt.MouseButton.RightButton:
-            self.context_requested.emit(None if hit in (None, "+", "gear", "eye") else hit, e.globalPosition().toPoint())
+            self.context_requested.emit(None if hit in (None, *HITS_FIXOS) else hit, e.globalPosition().toPoint())
 
     def mouseDoubleClickEvent(self, e) -> None:
         hit = self._hit(e.position())
-        if e.button() == Qt.MouseButton.LeftButton and hit and hit not in ("+", "gear", "eye"):
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        if hit is None and self._controles:
+            self.maximize_requested.emit()
+        elif hit and hit not in HITS_FIXOS:
             self.rename_requested.emit(hit)
 
     def mouseMoveEvent(self, e) -> None:
@@ -239,12 +285,38 @@ class TabHeader(QWidget):
             p.drawText(QRectF(x, r.top(), r.right() - x, r.height()), Qt.AlignmentFlag.AlignVCenter, text)
 
         p.setOpacity(1.0)
+        self._paint_controles(p)
         hot = self._hover == "+"
         p.setBrush(QColor(255, 255, 255, 18 if hot else 0))
         p.setPen(QPen(QColor(theme.OUTLINE), 1.2))
         p.drawEllipse(plus.adjusted(0.6, 0.6, -0.6, -0.6))
         p.drawPixmap(QPointF(plus.center().x() - 9, plus.center().y() - 9), icons.pixmap("plus", theme.TEXT if hot else theme.MUTED, 18, 2.0))
         self._paint_right(p)
+
+    def _paint_controles(self, p: QPainter) -> None:
+        """Minimizar, maximizar/restaurar e fechar: só o traço, sem contorno; o fundo só aparece sob o mouse (fechar fica vermelho)."""
+        for nome, r in self._controles_rects().items():
+            quente = self._hover == nome
+            fundo = QColor("#E5484D") if (quente and nome == "close") else QColor(255, 255, 255, 22 if quente else 0)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(fundo)
+            p.drawRoundedRect(r, 9, 9)
+            cor = QColor("#FFFFFF" if quente and nome == "close" else theme.TEXT if quente else theme.MUTED)
+            p.setPen(QPen(cor, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            c = r.center()
+            if nome == "min":
+                p.drawLine(QPointF(c.x() - 6, c.y() + 3), QPointF(c.x() + 6, c.y() + 3))
+            elif nome == "max" and not self._maximizada:
+                p.drawRoundedRect(QRectF(c.x() - 6, c.y() - 6, 12, 12), 2.5, 2.5)
+            elif nome == "max":  # restaurar: dois quadrados sobrepostos
+                p.drawRoundedRect(QRectF(c.x() - 6, c.y() - 3, 9, 9), 2, 2)
+                p.drawLine(QPointF(c.x() - 3, c.y() - 6), QPointF(c.x() + 4, c.y() - 6))
+                p.drawLine(QPointF(c.x() + 4, c.y() - 6), QPointF(c.x() + 6, c.y() - 4))
+                p.drawLine(QPointF(c.x() + 6, c.y() - 4), QPointF(c.x() + 6, c.y() + 3))
+            else:
+                p.drawLine(QPointF(c.x() - 5.5, c.y() - 5.5), QPointF(c.x() + 5.5, c.y() + 5.5))
+                p.drawLine(QPointF(c.x() - 5.5, c.y() + 5.5), QPointF(c.x() + 5.5, c.y() - 5.5))
 
     def _paint_right(self, p: QPainter) -> None:
         eye, gear = self._right_rects()

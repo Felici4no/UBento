@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPropertyAnimation, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QPropertyAnimation, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QLinearGradient, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame, QGraphicsOpacityEffect, QInputDialog, QMainWindow, QMenu, QMessageBox, QScrollArea,
     QStackedWidget, QVBoxLayout, QWidget,
 )
@@ -22,6 +23,73 @@ from .header import Tab, TabHeader
 from .metas_page import MetasPage
 from .overlay import ExpandOverlay
 from .settings import SettingsPage
+
+MARGEM_REDIMENSIONAR = 6  # px: a faixa na borda da janela que redimensiona
+
+
+def bordas_em(pos: QPoint, tamanho: QSize, margem: int = MARGEM_REDIMENSIONAR) -> Qt.Edge:
+    """Quais bordas da janela (esquerda, direita, topo, base) um ponto, em coordenadas da janela, está tocando."""
+    bordas = Qt.Edge(0)
+    if pos.x() < margem:
+        bordas |= Qt.Edge.LeftEdge
+    if pos.x() >= tamanho.width() - margem:
+        bordas |= Qt.Edge.RightEdge
+    if pos.y() < margem:
+        bordas |= Qt.Edge.TopEdge
+    if pos.y() >= tamanho.height() - margem:
+        bordas |= Qt.Edge.BottomEdge
+    return bordas
+
+
+def cursor_da_borda(bordas: Qt.Edge) -> Qt.CursorShape | None:
+    horizontal = bool(bordas & (Qt.Edge.LeftEdge | Qt.Edge.RightEdge))
+    vertical = bool(bordas & (Qt.Edge.TopEdge | Qt.Edge.BottomEdge))
+    if horizontal and vertical:
+        diagonal_principal = (bordas & Qt.Edge.LeftEdge and bordas & Qt.Edge.TopEdge) or (bordas & Qt.Edge.RightEdge and bordas & Qt.Edge.BottomEdge)
+        return Qt.CursorShape.SizeFDiagCursor if diagonal_principal else Qt.CursorShape.SizeBDiagCursor
+    if horizontal:
+        return Qt.CursorShape.SizeHorCursor
+    return Qt.CursorShape.SizeVerCursor if vertical else None
+
+
+class _Redimensionador(QObject):
+    """Sem a moldura do sistema não há borda para puxar: este filtro (no aplicativo todo) devolve a faixa de 6 px na borda da janela,
+    com o cursor certo, e entrega o redimensionamento ao sistema (`startSystemResize`, que preserva o encaixe do Windows)."""
+
+    def __init__(self, janela: QMainWindow):
+        super().__init__(janela)
+        self.janela = janela
+        self._cursor_ativo = False
+
+    def _bordas(self, evento) -> Qt.Edge:
+        if self.janela.isMaximized() or self.janela.isFullScreen():
+            return Qt.Edge(0)
+        return bordas_em(self.janela.mapFromGlobal(evento.globalPosition().toPoint()), self.janela.size())
+
+    def _cursor(self, bordas: Qt.Edge) -> None:
+        forma = cursor_da_borda(bordas)
+        if forma is not None and not self._cursor_ativo:
+            QApplication.setOverrideCursor(forma)
+            self._cursor_ativo = True
+        elif forma is not None:
+            QApplication.changeOverrideCursor(forma)
+        elif self._cursor_ativo:
+            QApplication.restoreOverrideCursor()
+            self._cursor_ativo = False
+
+    def eventFilter(self, obj, evento) -> bool:
+        tipo = evento.type()
+        if tipo not in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress) or not hasattr(obj, "window") or obj.window() is not self.janela:
+            return False
+        bordas = self._bordas(evento)
+        if tipo == QEvent.Type.MouseMove:
+            self._cursor(bordas)
+            return False
+        if bordas and evento.button() == Qt.MouseButton.LeftButton:
+            self.janela.redimensionar(bordas)
+            return True
+        return False
+
 
 SETTINGS = "settings"
 CFG = "cfg:"  # prefixo da página de configuração de um agente
@@ -59,6 +127,7 @@ class MainWindow(QMainWindow):
     def __init__(self, workspace: Workspace, animations: bool = True, metas: ServicoMetas | None = None, conexoes: ServicoConexoes | None = None, ouvintes=None):
         super().__init__()
         self.setWindowTitle("UBento")
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)  # sem moldura nem barra de título do sistema: o header faz esse papel
         self.setMinimumSize(760, 520)
         available = self.screen().availableGeometry() if self.screen() else None
         self.resize(980, min(1100, (available.height() - 40) if available else 1100))
@@ -76,6 +145,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(canvas)
         self.header = TabHeader()
         self.header.animate = animations
+        self.header.set_window_controls(True)
+        self.header.drag_requested.connect(self.mover)
+        self.header.minimize_requested.connect(self.showMinimized)
+        self.header.maximize_requested.connect(self.alternar_maximizada)
+        self.header.close_requested.connect(self.close)
+        self._redimensionador = _Redimensionador(self)
+        QApplication.instance().installEventFilter(self._redimensionador)
         self.stack = QStackedWidget()
         layout = QVBoxLayout(canvas)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -100,6 +176,32 @@ class MainWindow(QMainWindow):
         self._settings_page()
         self.sync()
         self._apply_prefs()
+
+    # -- janela sem moldura ------------------------------------------------
+
+    def mover(self) -> None:
+        """Arrastar pelo header: entrega o movimento ao sistema (preserva o encaixe do Windows)."""
+        if self.windowHandle() is not None:
+            self.windowHandle().startSystemMove()
+
+    def redimensionar(self, bordas: Qt.Edge) -> None:
+        if self.windowHandle() is not None:
+            self.windowHandle().startSystemResize(bordas)
+
+    def alternar_maximizada(self) -> None:
+        self.showNormal() if self.isMaximized() else self.showMaximized()
+
+    def changeEvent(self, e) -> None:
+        super().changeEvent(e)
+        if e.type() == QEvent.Type.WindowStateChange and hasattr(self, "header"):
+            self.header.set_maximized(self.isMaximized())  # troca o ícone entre maximizar e restaurar
+
+    def closeEvent(self, e) -> None:
+        QApplication.instance().removeEventFilter(self._redimensionador)  # o filtro vive no aplicativo: não pode sobreviver à janela
+        if QApplication.overrideCursor() is not None and self._redimensionador._cursor_ativo:
+            QApplication.restoreOverrideCursor()
+            self._redimensionador._cursor_ativo = False
+        super().closeEvent(e)
 
     # -- páginas -----------------------------------------------------------
 
