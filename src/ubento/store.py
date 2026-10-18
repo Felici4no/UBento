@@ -9,7 +9,8 @@ from __future__ import annotations
 import calendar
 import math
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from uuid import uuid4
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QObject, Signal
@@ -63,6 +64,16 @@ class Quote:
 
 
 @dataclass(frozen=True)
+class Trade:
+    """Movimento concreto de uma decisão: compra ou venda de um ativo contra dólar."""
+
+    side: str  # 'buy' | 'sell'
+    symbol: str
+    qty: float
+    usd: float
+
+
+@dataclass(frozen=True)
 class Decision:
     """Uma tomada de decisão de um agente (ou do usuário, no caso de swap manual)."""
 
@@ -72,6 +83,9 @@ class Decision:
     amount_text: str  # efeito, ex.: "+ 0,50000 ETH" (vazio se não houve movimento)
     moment: datetime
     agent: str | None = None  # id do agente; preenchido no agregado "Geral"
+    status: str = "executed"  # 'executed' | 'proposed' | 'rejected' | 'suggested'
+    trade: Trade | None = None
+    uid: str = field(default_factory=lambda: uuid4().hex[:10])
 
 
 # (tipo, título, justificativa, efeito)
@@ -214,6 +228,45 @@ class Store(QObject):
         today = self.now.date()
         rng = random.Random(f"ubento-{self.seed}-{today.year}-{today.month}")
         return {date(today.year, today.month, d): rng.choice([0, 0, 1, 2, 3, 4, 6, 8]) for d in range(1, today.day + 1)}
+
+    # -- decisões dos agentes -----------------------------------------------
+
+    def apply_trade(self, trade: Trade) -> bool:
+        """Aplica uma compra/venda aos saldos. Falso (sem alterar nada) se faltar saldo."""
+        if trade.side == "buy":
+            if self.holdings.get("USD", 0.0) + 1e-9 < trade.usd:
+                return False
+            self.holdings["USD"] = round(self.holdings["USD"] - trade.usd, 8)
+            self.holdings[trade.symbol] = round(self.holdings.get(trade.symbol, 0.0) + trade.qty, 8)
+        else:
+            if self.holdings.get(trade.symbol, 0.0) + 1e-9 < trade.qty:
+                return False
+            self.holdings[trade.symbol] = round(self.holdings[trade.symbol] - trade.qty, 8)
+            self.holdings["USD"] = round(self.holdings.get("USD", 0.0) + trade.usd, 8)
+        return True
+
+    def add_decision(self, decision: Decision) -> str | None:
+        """Registra uma decisão no topo da lista; executa o movimento se ela já nasce executada."""
+        if decision.status == "executed" and decision.trade and not self.apply_trade(decision.trade):
+            return "Saldo insuficiente"
+        self.decisions.insert(0, decision)
+        self.changed.emit()
+        return None
+
+    def resolve_decision(self, uid: str, approve: bool, now: datetime | None = None) -> str | None:
+        """Aprova ou recusa uma proposta. Devolve mensagem de erro, ou None."""
+        index = next((i for i, d in enumerate(self.decisions) if d.uid == uid and d.status == "proposed"), None)
+        if index is None:
+            return "Proposta não encontrada"
+        d = self.decisions[index]
+        if approve:
+            if d.trade and not self.apply_trade(d.trade):
+                return "Saldo insuficiente para executar"
+            self.decisions[index] = replace(d, status="executed", moment=now or datetime.now())
+        else:
+            self.decisions[index] = replace(d, status="rejected")
+        self.changed.emit()
+        return None
 
     def decisions_count(self) -> int:
         return sum(self.activity.values())

@@ -364,7 +364,8 @@ class ActionButton(QAbstractButton):
         p = QPainter(self)
         setup(p)
         rect = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
-        hot = self.underMouse()
+        hot = self.underMouse() and self.isEnabled()
+        p.setOpacity(1.0 if self.isEnabled() else 0.35)
         if self._primary:
             p.setBrush(hover_color(QColor(theme.BLUE)) if hot else QColor(theme.BLUE))
             p.setPen(Qt.PenStyle.NoPen)

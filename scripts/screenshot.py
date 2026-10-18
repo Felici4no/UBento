@@ -2,7 +2,8 @@
 
     python scripts/screenshot.py saida.png [--tab N] [--hover] [--menu CHAVE|vazio]
 
---tab N      seleciona a aba N (0 = Geral) ou "settings"
+--tab N      seleciona a aba N (0 = Geral), "settings" ou "cfg" (configuração do 1º agente)
+--run        roda os algoritmos dos agentes antes (gera propostas)
 --hide       liga o modo ocultar valores
 --expand K   salva <saida>-K.png com o card K expandido (crypto, total, summary, activity, decisions, agents, coin)
 --hover      simula o mouse sobre o gráfico de barras
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from PySide6.QtCore import QPoint, QRectF  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QRegion  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from ubento.ui import theme  # noqa: E402
@@ -40,9 +42,15 @@ def main() -> None:
     win.show()
     app.processEvents()
 
-    keys = ["overview"] + [a.id for a in ws.agents] + ["settings"]
+    first = ws.agents[0].id
+    keys = ["overview"] + [a.id for a in ws.agents] + ["settings", "cfg:" + first]
     which = arg("--tab") or "0"
-    tab = len(keys) - 1 if which == "settings" else int(which)
+    if "--run" in sys.argv:  # gera propostas/decisões dos agentes antes de capturar
+        for agent in ws.agents:
+            ws.run_agent(agent.id)
+    if which == "cfg":
+        win.open_config(first)
+    tab = {"settings": len(keys) - 2, "cfg": len(keys) - 1}.get(which) or int(which)
     if "--hide" in sys.argv:
         ws.set_pref("hide_values", True)
     win.select(keys[tab])
@@ -54,6 +62,7 @@ def main() -> None:
         chart._anim.stop()
         chart._shown = list(chart._to)
         chart.update()
+    QTest.qWait(700)  # deixa as animações de entrada terminarem
     app.processEvents()
 
     header, content = win.header, win.pages[keys[tab]].widget()

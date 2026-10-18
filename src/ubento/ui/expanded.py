@@ -268,6 +268,7 @@ def decisions_view(dash, ws):
     lookup = (lambda i: (a.name, a.color) if (a := ws.agent(i)) else None) if store.readonly else None
     lst = DecisionList(store, lookup)
     lst.setMinimumHeight(360)
+    lst.resolve_requested.connect(dash.resolve_decision)
     kinds = ["all", *KIND_LABELS]
     labels = {"all": "Todas", **KIND_LABELS}
     box = QWidget()

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
 from . import theme
+from .agent_page import AgentConfigPage
 from .components import Toast
 from .dashboard import Dashboard
 from .expanded import build as build_expanded
@@ -20,6 +21,7 @@ from .overlay import ExpandOverlay
 from .settings import SettingsPage
 
 SETTINGS = "settings"
+CFG = "cfg:"  # prefixo da página de configuração de um agente
 
 
 class _Canvas(QWidget):
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
         self.header.settings_requested.connect(lambda: self.select(SETTINGS))
         self.header.privacy_toggled.connect(lambda: workspace.set_pref("hide_values", not workspace.pref("hide_values")))
         workspace.changed.connect(self.sync)
+        workspace.agent_changed.connect(lambda _id: self._refresh_tabs())
         workspace.prefs_changed.connect(self._apply_prefs)
         self._settings_page()
         self.sync()
@@ -103,7 +106,8 @@ class MainWindow(QMainWindow):
         return scroll
 
     def _page(self, key: str, store: Store) -> QScrollArea:
-        dash = Dashboard(store, self.workspace if key == OVERVIEW else None)
+        dash = Dashboard(store, self.workspace, self.workspace.agent(key) if key != OVERVIEW else None)
+        dash.configure_requested.connect(self.open_config)
         dash.notify.connect(self.toast.show_message)
         dash.open_agent.connect(self.select)
         dash.expand_requested.connect(lambda kind, card, d=dash: self.expand(d, kind, card))
@@ -121,7 +125,7 @@ class MainWindow(QMainWindow):
         self.header.set_greeting(ws.pref("user_name"))
         self.header.set_hidden(ws.pref("hide_values"))
         for key in self.pages:
-            if key != SETTINGS and ws.pref("default_range") != self.dashboard(key).total.range_key:
+            if key != SETTINGS and not key.startswith(CFG) and ws.pref("default_range") != self.dashboard(key).total.range_key:
                 self.dashboard(key).total.set_range(ws.pref("default_range"))
 
     def dashboard(self, key: str) -> Dashboard:
@@ -129,7 +133,7 @@ class MainWindow(QMainWindow):
 
     def sync(self) -> None:
         ws = self.workspace
-        wanted = {OVERVIEW, SETTINGS} | {a.id for a in ws.agents}
+        wanted = {OVERVIEW, SETTINGS} | {a.id for a in ws.agents} | {CFG + a.id for a in ws.agents}
         for key in list(self.pages):
             if key not in wanted:
                 page = self.pages.pop(key)
@@ -143,9 +147,18 @@ class MainWindow(QMainWindow):
                 self.dashboard(agent.id).total.set_range(ws.pref("default_range"))
         if self.current not in self.pages:
             self.current = OVERVIEW
-        tabs = [Tab(OVERVIEW, ws.overview_name, None)] + [Tab(a.id, a.name, a.color) for a in ws.agents]
-        self.header.set_tabs(tabs, self.current)
+        self._refresh_tabs()
         self.stack.setCurrentWidget(self.pages[self.current])
+
+    def _refresh_tabs(self) -> None:
+        ws = self.workspace
+        tabs = [Tab(OVERVIEW, ws.overview_name, None, ws.pending_count())]
+        tabs += [Tab(a.id, a.name, a.color, ws.pending_count(a.id)) for a in ws.agents]
+        self.header.set_tabs(tabs, self._tab_key())
+
+    def _tab_key(self) -> str:
+        """A página de configuração mantém a aba do agente destacada."""
+        return self.current[len(CFG):] if self.current.startswith(CFG) else self.current
 
     def select(self, key: str) -> None:
         if key not in self.pages:
@@ -153,7 +166,7 @@ class MainWindow(QMainWindow):
         self.overlay.collapse(animate=False)
         changed = key != self.current
         self.current = key
-        self.header.set_current(key)
+        self.header.set_current(self._tab_key())
         self.stack.setCurrentWidget(self.pages[key])
         if changed:
             self._fade_in(self.pages[key])
@@ -169,6 +182,15 @@ class MainWindow(QMainWindow):
         anim.setEndValue(1.0)
         anim.finished.connect(lambda: page.setGraphicsEffect(None))  # solta o efeito: rende mais sem ele
         anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+
+    def open_config(self, agent_id: str) -> None:
+        key = CFG + agent_id
+        if key not in self.pages and self.workspace.agent(agent_id):
+            page = AgentConfigPage(self.workspace, agent_id)
+            page.notify.connect(self.toast.show_message)
+            page.back_requested.connect(lambda: self.select(agent_id))
+            self.pages[key] = self._scroll(page)
+        self.select(key)
 
     # -- expansão de cards ---------------------------------------------------
 
@@ -220,8 +242,10 @@ class MainWindow(QMainWindow):
         if key is None:
             menu.addAction("Novo agente", self.add_agent)
             return menu
-        menu.addAction("Renomear…", lambda: self.rename(key))
         agent = ws.agent(key)
+        if agent is not None:
+            menu.addAction("Configurar agente…", lambda: self.open_config(key))
+        menu.addAction("Renomear…", lambda: self.rename(key))
         if agent is None:  # aba "Geral": só renomeia
             return menu
 

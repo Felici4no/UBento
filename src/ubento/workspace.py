@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 
 from PySide6.QtCore import QObject, QSettings, Signal
 
-from . import formatting
+from . import engine, formatting
+from .agent_config import AgentConfig
 from .store import RANGES, Store
 
 OVERVIEW = "overview"
@@ -27,6 +29,7 @@ class Agent:
     seed: str
     scale: float
     store: Store = field(repr=False, default=None)  # type: ignore[assignment]
+    config: AgentConfig = field(default_factory=AgentConfig)
 
 
 DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1M"}
@@ -34,6 +37,7 @@ DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1
 
 class Workspace(QObject):
     changed = Signal()  # estrutura ou aparência dos agentes mudou
+    agent_changed = Signal(str)  # configuração de um agente mudou (id)
     prefs_changed = Signal()
 
     def __init__(self, settings: QSettings | None = None) -> None:
@@ -44,7 +48,7 @@ class Workspace(QObject):
         self.agents: list[Agent] = []
         self.overview = Store.combined([])
         if not self._load():
-            self.agents = [self._make("Pessoal", COLORS[0], "main", 1.0), self._make("Empresa", COLORS[1], "empresa", 2.6)]
+            self.agents = self._default_agents()
         self._refresh_overview()
         formatting.set_hidden(bool(self.prefs["hide_values"]))
 
@@ -79,9 +83,78 @@ class Workspace(QObject):
 
     def restore_default_agents(self) -> None:
         """Volta ao conjunto inicial de agentes."""
-        self.agents = [self._make("Pessoal", COLORS[0], "main", 1.0), self._make("Empresa", COLORS[1], "empresa", 2.6)]
+        self.agents = self._default_agents()
         self.overview_name = "Geral"
         self._commit()
+
+    def _default_agents(self) -> list[Agent]:
+        personal = self._make("Pessoal", COLORS[0], "main", 1.0)
+        company = self._make("Empresa", COLORS[1], "empresa", 2.6)
+        company.config = AgentConfig(strategy="rebalance", mode="auto", frequency="weekly", reserve_pct=25)
+        return [personal, company]
+
+    # -- configuração e execução dos agentes --------------------------------
+
+    def set_config(self, agent_id: str, **changes) -> None:
+        agent = self.agent(agent_id)
+        if agent is None:
+            return
+        for key, value in changes.items():
+            if not hasattr(agent.config, key):
+                raise AttributeError(key)
+            setattr(agent.config, key, value)
+        agent.config.validated()
+        self._save()
+        self.agent_changed.emit(agent_id)
+
+    def reset_config(self, agent_id: str) -> None:
+        agent = self.agent(agent_id)
+        if agent is not None:
+            agent.config = AgentConfig()
+            self._save()
+            self.agent_changed.emit(agent_id)
+
+    def run_agent(self, agent_id: str, now: datetime | None = None) -> tuple[int, str]:
+        """Roda o algoritmo do agente. Devolve (decisões geradas, mensagem para o usuário)."""
+        agent = self.agent(agent_id)
+        if agent is None:
+            return 0, ""
+        cfg = agent.config
+        if cfg.strategy == "manual":
+            return 0, "Este agente é manual: não toma decisões sozinho"
+        if not cfg.active:
+            return 0, "Agente pausado. Ative-o para rodar"
+        now = now or datetime.now()
+        status = {"auto": "executed", "approve": "proposed", "suggest": "suggested"}[cfg.mode]
+        made = 0
+        for d in engine.decide(cfg, agent.store, now):
+            if d.trade is None:  # "manteve…" não precisa de aprovação
+                agent.store.add_decision(d)
+            elif agent.store.add_decision(replace(d, status=status)) is not None:
+                continue  # sem saldo: descarta
+            made += 1
+        cfg.last_run = now.isoformat(timespec="seconds")
+        self._save()
+        self.agent_changed.emit(agent_id)
+        text = {
+            "auto": f"{made} decisões executadas",
+            "approve": f"{made} propostas aguardando você",
+            "suggest": f"{made} sugestões registradas",
+        }[cfg.mode]
+        return made, text
+
+    def resolve_decision(self, uid: str, approve: bool) -> str | None:
+        """Aprova/recusa uma proposta, onde quer que ela esteja (inclusive vista pelo Geral)."""
+        for agent in self.agents:
+            if any(d.uid == uid for d in agent.store.decisions):
+                error = agent.store.resolve_decision(uid, approve)
+                self.agent_changed.emit(agent.id)
+                return error
+        return "Proposta não encontrada"
+
+    def pending_count(self, agent_id: str | None = None) -> int:
+        agents = [a for a in self.agents if agent_id in (None, a.id)]
+        return sum(1 for a in agents for d in a.store.decisions if d.status == "proposed")
 
     # -- consulta ----------------------------------------------------------
 
@@ -108,6 +181,7 @@ class Workspace(QObject):
         copy = self._make(f"{src.name} (cópia)", src.color, src.seed, src.scale)
         copy.store.holdings = dict(src.store.holdings)
         copy.store.decisions = list(src.store.decisions)
+        copy.config = AgentConfig.from_dict(src.config.to_dict())
         self.agents.insert(self.index(agent_id) + 1, copy)
         self._commit()
         return copy
@@ -172,7 +246,7 @@ class Workspace(QObject):
         data = {
             "overview_name": self.overview_name,
             "prefs": self.prefs,
-            "agents": [{"id": a.id, "name": a.name, "color": a.color, "seed": a.seed, "scale": a.scale} for a in self.agents],
+            "agents": [{"id": a.id, "name": a.name, "color": a.color, "seed": a.seed, "scale": a.scale, "config": a.config.to_dict()} for a in self.agents],
         }
         self._settings.setValue("workspace", json.dumps(data))
         self._settings.sync()
@@ -188,7 +262,8 @@ class Workspace(QObject):
             self.overview_name = data.get("overview_name", "Geral")
             self.prefs.update({k: v for k, v in data.get("prefs", {}).items() if k in DEFAULT_PREFS})
             self.agents = [
-                Agent(d["id"], d["name"], d["color"], d["seed"], float(d["scale"]), self._store(d["id"], d["seed"], float(d["scale"])))
+                Agent(d["id"], d["name"], d["color"], d["seed"], float(d["scale"]), self._store(d["id"], d["seed"], float(d["scale"])),
+                      AgentConfig.from_dict(d.get("config")))
                 for d in data["agents"]
             ]
             return True

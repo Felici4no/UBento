@@ -106,7 +106,7 @@ def test_context_menu_contents(window):
     assert labels(window.build_menu(None)) == ["Novo agente"]
     assert labels(window.build_menu("overview")) == ["Renomear…"]
     agent_menu = labels(window.build_menu(window.workspace.agents[0].id))
-    assert agent_menu == ["Renomear…", "Cor", "Duplicar", "Mover para a esquerda", "Mover para a direita", "Remover"]
+    assert agent_menu == ["Configurar agente…", "Renomear…", "Cor", "Duplicar", "Mover para a esquerda", "Mover para a direita", "Remover"]
 
 
 def test_overview_swaps_agents_card_for_exchange(window):
@@ -219,3 +219,89 @@ def test_decision_filter_in_expanded_list(window):
     assert len(lst.items()) == 0
     store.execute("USD", "ETH", 500)
     assert len(lst.items()) == 1 and len(store.decisions) == total + 1
+
+
+def test_config_page_opens_and_keeps_the_agent_tab_highlighted(window):
+    agent = window.workspace.agents[0]
+    window.open_config(agent.id)
+    assert window.current == f"cfg:{agent.id}"
+    assert window.header._current == agent.id
+
+
+def test_config_page_edits_the_agent(window):
+    agent = window.workspace.agents[0]
+    window.open_config(agent.id)
+    page = window.pages[f"cfg:{agent.id}"].widget()
+
+    page.strategy_cards["dca"].click()
+    assert agent.config.strategy == "dca"
+    assert page.param_rows["trade_size_pct"].isVisibleTo(page)
+    assert not page.param_rows["stop_loss_pct"].isVisibleTo(page)
+
+    page.sliders["reserve_pct"].valueChanged.emit(35)
+    assert agent.config.reserve_pct == 35
+
+    page.mode_buttons["buttons"]["auto"].click()
+    assert agent.config.mode == "auto"
+
+    page.chips["BNB"].click()
+    assert "BNB" not in agent.config.assets
+    page.swatches.picked.emit("#EF4B3F")
+    assert agent.color == "#EF4B3F"
+
+
+def test_config_page_refuses_to_clear_all_assets(window):
+    agent = window.workspace.agents[0]
+    window.open_config(agent.id)
+    page = window.pages[f"cfg:{agent.id}"].widget()
+    window.workspace.set_config(agent.id, assets=["ETH"])
+    page.chips["ETH"].setChecked(False)
+    page._assets_changed()
+    assert agent.config.assets == ["ETH"]
+
+
+def test_manual_strategy_hides_limits_and_disables_run(window):
+    agent = window.workspace.agents[0]
+    window.open_config(agent.id)
+    page = window.pages[f"cfg:{agent.id}"].widget()
+    page.strategy_cards["manual"].click()
+    assert not page.sections["limits"].isVisibleTo(page)
+    assert not page.run.isEnabled()
+
+
+def test_agent_bar_runs_and_proposals_can_be_approved(window):
+    agent = window.workspace.agents[0]
+    window.workspace.set_config(agent.id, strategy="dca", mode="approve")
+    dash = window.dashboard(agent.id)
+    dash.bar.run_requested.emit()
+    assert window.workspace.pending_count(agent.id) == 1
+    assert window.header._tabs[1].pending == 1
+    uid = next(d.uid for d in agent.store.decisions if d.status == "proposed")
+    dash.decisions.resolve_requested.emit(uid, True)
+    assert window.workspace.pending_count(agent.id) == 0
+    assert window.header._tabs[1].pending == 0
+
+
+def test_decision_list_buttons_hit_testing(window):
+    from PySide6.QtCore import QPointF
+
+    agent = window.workspace.agents[0]
+    window.workspace.set_config(agent.id, strategy="dca", mode="approve")
+    window.workspace.run_agent(agent.id)
+    lst = window.dashboard(agent.id).decisions.list
+    lst.resize(480, 300)
+    ok, no = lst._buttons(0)
+    hits = []
+    lst.resolve_requested.connect(lambda uid, approve: hits.append(approve))
+    assert lst._hit_button(ok.center())[1] is True
+    assert lst._hit_button(no.center())[1] is False
+    assert lst._hit_button(QPointF(20, 20)) is None
+
+
+def test_removing_an_agent_drops_its_config_page(window):
+    ws = window.workspace
+    extra = ws.add("Temp")
+    window.open_config(extra.id)
+    assert f"cfg:{extra.id}" in window.pages
+    ws.remove(extra.id)
+    assert f"cfg:{extra.id}" not in window.pages and window.current == "overview"

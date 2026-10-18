@@ -19,7 +19,7 @@ REPO = "github.com/Felici4no/UBento"
 REPO_URL = f"https://{REPO}"
 
 
-class _Row(QWidget):
+class SettingRow(QWidget):
     """Título + descrição à esquerda, controle à direita, separador embaixo."""
 
     def __init__(self, title: str, description: str, control: QWidget | None, *, last=False, parent=None):
@@ -45,8 +45,8 @@ class _Row(QWidget):
             p.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
 
 
-class _Section(Card):
-    def __init__(self, title: str, rows: list[_Row], parent=None):
+class SettingSection(Card):
+    def __init__(self, title: str, rows: list[SettingRow], parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         v = QVBoxLayout(self)
@@ -111,20 +111,20 @@ class SettingsPage(QWidget):
         github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
 
         sections = [
-            _Section("PERFIL", [_Row("Nome", "Como o UBento chama você no topo da tela.", self.name)]),
-            _Section("EXIBIÇÃO", [
-                _Row("Ocultar valores", "Mascara saldos e valores em todas as telas. Também fica no ícone de olho do topo.", self.hide_values),
-                _Row("Período padrão do gráfico", "Usado ao abrir o app e ao trocar de aba.", range_box),
+            SettingSection("PERFIL", [SettingRow("Nome", "Como o UBento chama você no topo da tela.", self.name)]),
+            SettingSection("EXIBIÇÃO", [
+                SettingRow("Ocultar valores", "Mascara saldos e valores em todas as telas. Também fica no ícone de olho do topo.", self.hide_values),
+                SettingRow("Período padrão do gráfico", "Usado ao abrir o app e ao trocar de aba.", range_box),
             ]),
-            _Section("AGENTES", [
-                _Row("Novo agente", "Cada agente é uma carteira com seus próprios saldos. Clique com o botão direito numa aba "
+            SettingSection("AGENTES", [
+                SettingRow("Novo agente", "Cada agente é uma carteira com seus próprios saldos. Clique com o botão direito numa aba "
                      "para renomear, mudar a cor, duplicar, mover ou remover.", new_agent),
             ]),
-            _Section("DADOS", [
-                _Row("Dados de demonstração", "Volta saldos, swaps e decisões ao estado inicial. Nomes e cores dos agentes são mantidos.", reset_data),
-                _Row("Abas padrão", "Descarta os agentes atuais e recria Pessoal e Empresa.", reset_tabs),
+            SettingSection("DADOS", [
+                SettingRow("Dados de demonstração", "Volta saldos, swaps e decisões ao estado inicial. Nomes e cores dos agentes são mantidos.", reset_data),
+                SettingRow("Abas padrão", "Descarta os agentes atuais e recria Pessoal e Empresa.", reset_tabs),
             ]),
-            _Section("SOBRE", [_Row(f"UBento {__version__}", f"Código aberto, licença MIT · {REPO}", github)]),
+            SettingSection("SOBRE", [SettingRow(f"UBento {__version__}", f"Código aberto, licença MIT · {REPO}", github)]),
         ]
 
         column = QVBoxLayout()

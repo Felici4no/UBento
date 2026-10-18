@@ -6,7 +6,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ..store import Store
-from ..workspace import Workspace
+from ..workspace import Agent, Workspace
+from .agent_bar import AgentBar
 from .cards import ActivityCard, AgentsCard, CoinCard, CryptoCard, DecisionsCard, ExchangeCard, SummaryCard, TotalCard
 
 GAP = 20
@@ -18,17 +19,18 @@ class Dashboard(QWidget):
     notify = Signal(str, bool)
     open_agent = Signal(str)
     expand_requested = Signal(str, object)  # (tipo do card, widget do card)
+    configure_requested = Signal(str)  # id do agente
 
-    def __init__(self, store: Store, workspace: Workspace | None = None, parent=None):
-        """Com `workspace`, vira a aba Geral: o card Agentes ocupa o lugar do Swap."""
+    def __init__(self, store: Store, workspace: Workspace, agent: Agent | None = None, parent=None):
+        """Sem `agent`, vira a aba Geral: o card Agentes ocupa o lugar do Swap."""
         super().__init__(parent)
-        self.store = store
-        self.setMinimumSize(NATURAL_WIDTH, NATURAL_HEIGHT)
-        overview = workspace is not None
+        self.store, self.workspace, self.agent = store, workspace, agent
+        overview = agent is None
+        self.setMinimumSize(NATURAL_WIDTH, NATURAL_HEIGHT + (0 if overview else 64))
 
         def lookup(agent_id: str):
-            agent = workspace.agent(agent_id) if workspace else None
-            return (agent.name, agent.color) if agent else None
+            found = workspace.agent(agent_id)
+            return (found.name, found.color) if found else None
 
         self.crypto = CryptoCard(store)
         self.total = TotalCard(store)
@@ -38,6 +40,8 @@ class Dashboard(QWidget):
         self.coin = CoinCard(store)
         self.exchange: ExchangeCard | None = None
         self.agents: AgentsCard | None = None
+        self.bar: AgentBar | None = None
+        self.decisions.resolve_requested.connect(self.resolve_decision)
 
         if overview:
             self.agents = AgentsCard(workspace)
@@ -49,6 +53,9 @@ class Dashboard(QWidget):
             bottom_left = self.agents
             self.coin.buy_clicked.connect(lambda: self.notify.emit("Escolha um agente para comprar USDC", False))
         else:
+            self.bar = AgentBar(workspace, agent.id)
+            self.bar.run_requested.connect(self._run_agent)
+            self.bar.configure_requested.connect(lambda: self.configure_requested.emit(agent.id))
             self.exchange = ExchangeCard(store)
             self.exchange.notify.connect(self.notify)
             bottom_left = self.exchange
@@ -88,10 +95,25 @@ class Dashboard(QWidget):
 
         holder = QWidget()
         holder.setMaximumWidth(960)
-        holder.setLayout(grid)
+        column = QVBoxLayout(holder)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(16)
+        if self.bar:
+            column.addWidget(self.bar)
+        column.addLayout(grid, 1)
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(32, 8, 32, 28)
         outer.addStretch(1)
         outer.addWidget(holder, 100)
         outer.addStretch(1)
+
+    # -- ações dos agentes ----------------------------------------------------
+
+    def _run_agent(self) -> None:
+        made, message = self.workspace.run_agent(self.agent.id)
+        self.notify.emit(message, made > 0)
+
+    def resolve_decision(self, uid: str, approve: bool) -> None:
+        error = self.workspace.resolve_decision(uid, approve)
+        self.notify.emit(error or ("Decisão aprovada e executada" if approve else "Proposta recusada"), error is None)

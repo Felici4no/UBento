@@ -22,6 +22,7 @@ class Tab:
     key: str
     name: str
     color: str | None  # None = aba "Geral"
+    pending: int = 0  # propostas de decisão aguardando aprovação
 
 
 class TabHeader(QWidget):
@@ -228,6 +229,10 @@ class TabHeader(QWidget):
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(QPointF(x + 4, r.center().y()), 4.5, 4.5)
                 x += 18
+            if tab.pending:
+                p.setBrush(QColor(theme.WARNING))
+                p.setPen(QPen(QColor('#FFFFFF' if active else theme.BG_TOP), 2))
+                p.drawEllipse(QPointF(r.right() - 9, r.top() + 8), 4.5, 4.5)
             p.setPen(fg)
             p.setFont(self._font)
             text = fm.elidedText(tab.name, Qt.TextElideMode.ElideRight, int(r.right() - 18 - x))
