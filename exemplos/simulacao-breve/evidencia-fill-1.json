@@ -1,0 +1,29 @@
+{
+  "registros_externos": [
+    {
+      "fonte_id": "corretora-sim",
+      "id_externo": "fill-1",
+      "versao": 1,
+      "id_ordem": null,
+      "mercado_id": "bolsa-a",
+      "conta_id": "conta-a",
+      "ativo_id": "tokx",
+      "moeda_cotacao_id": "usd",
+      "lado": "compra",
+      "quantidade": "4",
+      "preco": "9.5",
+      "taxas": [
+        {
+          "ativo_id": "tokx",
+          "valor": "0.02"
+        }
+      ],
+      "status": "confirmado",
+      "executado_em": "2026-10-20T10:00:00Z",
+      "recebido_em": "2026-10-20T10:00:30Z",
+      "origem": "simulado",
+      "estorna_id_externo": null
+    }
+  ],
+  "coberturas_execucoes": []
+}

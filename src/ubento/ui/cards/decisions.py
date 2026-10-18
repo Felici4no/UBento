@@ -1,6 +1,8 @@
-"""Card "Decisões": linha do tempo das decisões tomadas (rolável, com esmaecimento no rodapé).
+"""Card "Decisões": o registro (log) das decisões tomadas, rolável, com esmaecimento no rodapé.
 
-Propostas de agentes no modo "pedir aprovação" aparecem com os botões ✓ e ✕.
+Cada linha é uma entrada de log: título e justificativa, o RESULTADO (verde no lucro, vermelho na perda, já líquido da taxa), e uma linha de
+registro com data e hora, o movimento, o valor aplicado e a taxa. Propostas de agentes no modo "pedir aprovação" aparecem com os botões ✓ e ✕
+(sem resultado: ele só existe depois de executada).
 """
 
 from __future__ import annotations
@@ -12,19 +14,53 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from ...formatting import MASK, ago, is_hidden
+from ...formatting import MASK, is_hidden, number
 from ...store import Decision, Store
 from .. import icons, theme
 from ..components import Card, Label, setup
 
 W = theme.W
-ROW_H = 68
+ROW_H = 84
 ICONS = {"buy": "trending-up", "sell": "trending-down", "hold": "pause", "rebalance": "repeat", "swap": "swap"}
 KIND_LABELS = {"buy": "Compra", "sell": "Venda", "hold": "Manutenção", "rebalance": "Rebalanceamento", "swap": "Swap"}
 STATUS_TAGS = {"proposed": ("Proposta", theme.WARNING), "approved": ("Aprovada", theme.GREEN),
                "suggested": ("Sugestão", theme.BLUE_SOFT), "rejected": ("Recusada", theme.MUTED)}
 
 AgentLookup = Callable[[str], "tuple[str, str] | None"]  # id -> (nome, cor)
+
+
+def resultado_cor(valor: float | None) -> str:
+    """Verde no lucro, vermelho na perda, cinza quando não há resultado (ou é zero)."""
+    if valor is None or round(valor, 2) == 0:
+        return theme.MUTED
+    return theme.GREEN if valor > 0 else theme.RED
+
+
+def usd_texto(valor: float, sinal: bool = False) -> str:
+    """`1234.5` -> `US$ 1.234,50`; com `sinal`, `+US$ …` / `−US$ …`. Respeita o modo "ocultar valores"."""
+    if is_hidden():
+        return f"US$ {MASK}"
+    prefixo = ("+" if valor > 0 else "−" if valor < 0 else "") if sinal else ""
+    return f"{prefixo}US$ {number(abs(valor), 2)}"
+
+
+def resultado_info(d: Decision) -> tuple[str, str, str] | None:
+    """(texto, cor, rótulo) do resultado de uma decisão EXECUTADA com movimento; None nos demais casos."""
+    if d.status != "executed" or d.pnl_usd is None:
+        return None
+    rotulo = "realizado, líquido da taxa" if d.pnl_realizado else "em aberto, líquido da taxa"
+    return usd_texto(d.pnl_usd, sinal=True), resultado_cor(d.pnl_usd), rotulo
+
+
+def linha_de_log(d: Decision) -> str:
+    """A linha de registro: data e hora (com segundos), o movimento, o valor aplicado e a taxa."""
+    partes = [d.moment.strftime("%d/%m/%Y %H:%M:%S")]
+    if d.amount_text:
+        partes.append(f"{d.amount_text.split(' ', 1)[0]} {MASK}" if is_hidden() and " " in d.amount_text else d.amount_text)
+    if d.value_usd is not None:
+        partes.append(f"Valor {usd_texto(d.value_usd)}")
+        partes.append(f"Taxa {usd_texto(d.fee_usd)}")
+    return "  ·  ".join(partes)
 
 
 class DecisionList(QWidget):
@@ -133,47 +169,40 @@ class DecisionList(QWidget):
         proposed = d.status == "proposed"
         approved = d.status == "approved"
         edge = w - (84 if proposed else 112 if approved else 0)  # reserva espaço para ✓ ✕ ou para "Registrar"
+        info = resultado_info(d)
+        cor = QColor(info[1]) if info else QColor(theme.TEXT)
         p.setOpacity(0.5 if d.status == "rejected" else 1.0)
         if hovered or proposed:
             p.setBrush(QColor(255, 255, 255, 10 if hovered else 6))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawRoundedRect(QRectF(-8, y + 2, w + 16, ROW_H - 4), 14, 14)
+        # ícone: o contorno e o traço seguem o resultado (verde, vermelho ou neutro)
+        centro_y = y + 36
         p.setBrush(QColor("#11111A"))
-        p.setPen(QPen(QColor("#1B1B27"), 1))
-        p.drawEllipse(QRectF(0.5, y + (ROW_H - 52) / 2 + 0.5, 51, 51))
-        p.drawPixmap(QPointF(18, y + (ROW_H - 18) / 2), icons.pixmap(ICONS.get(d.kind, "swap"), theme.TEXT, 18, 1.9))
+        p.setPen(QPen(cor if info else QColor("#1B1B27"), 1.6 if info else 1))
+        p.drawEllipse(QRectF(0.5, centro_y - 25.5, 51, 51))
+        p.drawPixmap(QPointF(18, centro_y - 9), icons.pixmap(ICONS.get(d.kind, "swap"), cor.name() if info else theme.TEXT, 18, 1.9))
 
-        # efeito (à direita): inteiro em branco, centavos/moeda em cinza
+        # coluna da direita: o RESULTADO em destaque e, embaixo, o que ele significa
         right_w = 0.0
-        if d.amount_text:
-            p.setFont(theme.font(16, W.Medium))
-            fm = p.fontMetrics()
-            sign, _, rest = d.amount_text.partition(" ")
-            whole, comma, tail = rest.partition(",")
-            main, dim = (f"{sign} {MASK}", "") if is_hidden() else (f"{sign} {whole}", f"{comma}{tail}")
-            dim_w = fm.horizontalAdvance(dim)
-            p.setPen(QColor(theme.MUTED))
-            p.drawText(QRectF(edge - dim_w - 2, y + 11, dim_w + 4, 22), Qt.AlignmentFlag.AlignVCenter, dim)
-            main_w = fm.horizontalAdvance(main)
-            p.setPen(QColor(theme.TEXT))
-            p.drawText(QRectF(edge - dim_w - 2 - main_w - 2, y + 11, main_w + 4, 22), Qt.AlignmentFlag.AlignVCenter, main)
-            right_w = dim_w + main_w + 14
+        if info:
+            texto, _, rotulo = info
+            p.setFont(theme.font(17, W.DemiBold))
+            right_w = max(p.fontMetrics().horizontalAdvance(texto), 0)
+            p.setPen(cor)
+            p.drawText(QRectF(edge - right_w - 4, y + 7, right_w + 4, 24), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, texto)
+            p.setFont(theme.font(11, W.Normal))
+            p.setPen(QColor(theme.DIM))
+            rot_w = p.fontMetrics().horizontalAdvance(rotulo)
+            p.drawText(QRectF(edge - rot_w - 4, y + 30, rot_w + 4, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, rotulo)
+            right_w = max(right_w, rot_w)
 
-        # metadados da linha de baixo (à direita): [● agente ·] tempo
-        p.setFont(theme.font(13, W.Normal))
-        fm = p.fontMetrics()
-        label = ago(d.moment, now)
-        label_w = fm.horizontalAdvance(label)
-        agent = self.lookup(d.agent) if (self.lookup and d.agent) else None
-        agent_name = fm.elidedText(agent[0], Qt.TextElideMode.ElideRight, 90) if agent else ""
-        meta_w = label_w + ((fm.horizontalAdvance(agent_name) + 26) if agent else 0)
-
-        # título ocupa a largura toda que o efeito deixa livre
+        # título
         p.setPen(QColor(theme.TEXT))
         p.setFont(theme.font(16, W.Medium))
-        title_room = max(60.0, edge - 68 - max(right_w, 90))
+        title_room = max(60.0, edge - 68 - max(right_w, 20) - 12)
         title = QFontMetrics(p.font()).elidedText(d.title, Qt.TextElideMode.ElideRight, int(title_room))
-        p.drawText(QRectF(68, y + 11, title_room, 22), Qt.AlignmentFlag.AlignVCenter, title)
+        p.drawText(QRectF(68, y + 8, title_room, 22), Qt.AlignmentFlag.AlignVCenter, title)
 
         # justificativa, precedida pela etiqueta de status (Proposta / Sugestão / Recusada)
         x = 68.0
@@ -184,26 +213,32 @@ class DecisionList(QWidget):
             color = QColor(tag[1])
             p.setBrush(QColor(color.red(), color.green(), color.blue(), 30))
             p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(x, y + 36, tag_w, 18), 9, 9)
+            p.drawRoundedRect(QRectF(x, y + 32, tag_w, 18), 9, 9)
             p.setPen(color)
-            p.drawText(QRectF(x, y + 36, tag_w, 18), Qt.AlignmentFlag.AlignCenter, tag[0])
+            p.drawText(QRectF(x, y + 32, tag_w, 18), Qt.AlignmentFlag.AlignCenter, tag[0])
             x += tag_w + 8
-        p.setPen(QColor(theme.DIM))
+        p.setPen(QColor(theme.MUTED))
         p.setFont(theme.font(13, W.Normal))
-        room = max(20.0, edge - x - meta_w - 14)
+        room = max(20.0, edge - x - 8)
         detail = QFontMetrics(p.font()).elidedText(d.detail, Qt.TextElideMode.ElideRight, int(room))
-        p.drawText(QRectF(x, y + 35, room, 20), Qt.AlignmentFlag.AlignVCenter, detail)
+        p.drawText(QRectF(x, y + 31, room, 20), Qt.AlignmentFlag.AlignVCenter, detail)
 
+        # linha de registro (log): data e hora · movimento · valor · taxa, e o agente à direita
+        agent = self.lookup(d.agent) if (self.lookup and d.agent) else None
+        p.setFont(theme.font(12, W.Normal))
+        fm = p.fontMetrics()
+        agent_name = fm.elidedText(agent[0], Qt.TextElideMode.ElideRight, 90) if agent else ""
+        agent_w = (fm.horizontalAdvance(agent_name) + 22) if agent else 0
+        room_log = max(40.0, edge - 68 - agent_w - 8)
         p.setPen(QColor(theme.DIM))
-        p.drawText(QRectF(edge - label_w - 4, y + 35, label_w + 4, 20), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+        p.drawText(QRectF(68, y + 55, room_log, 18), Qt.AlignmentFlag.AlignVCenter, fm.elidedText(linha_de_log(d), Qt.TextElideMode.ElideRight, int(room_log)))
         if agent:
             nw = fm.horizontalAdvance(agent_name)
-            gap = label_w + 14
             p.setPen(QColor(theme.MUTED))
-            p.drawText(QRectF(edge - gap - nw - 4, y + 35, nw + 6, 20), Qt.AlignmentFlag.AlignVCenter, agent_name)
+            p.drawText(QRectF(edge - nw - 4, y + 55, nw + 6, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, agent_name)
             p.setBrush(QColor(agent[1]))
             p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(edge - gap - nw - 12, y + 45), 4, 4)
+            p.drawEllipse(QPointF(edge - nw - 12, y + 64), 4, 4)
 
         if approved:
             caixa = self._registrar_rect(y)

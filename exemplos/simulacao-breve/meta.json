@@ -1,0 +1,210 @@
+{
+  "schema_versao": 1,
+  "origem": "simulado",
+  "descricao": "Simulação breve: meta de 10 tokx. Sem execuções nem evidências; você registra e importa pela tela.",
+  "meta": {
+    "id": "meta-tokx-001",
+    "schema_versao": 1,
+    "criada_em": "2026-10-20T07:30:00Z",
+    "analise_id": "analise-tokx-001",
+    "analise_versao": 1,
+    "analise_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "substitui_meta_id": null,
+    "objetivo": {
+      "tipo": "acumular_quantidade",
+      "ativo_id": "tokx",
+      "moeda_cotacao_id": "usd",
+      "quantidade_alvo": "10",
+      "prazo": "2026-10-20T16:00:00Z"
+    },
+    "mercado": {
+      "mercado_id": "bolsa-a",
+      "conta_id": "conta-a",
+      "incremento_preco": "0.0001",
+      "incremento_quantidade": "0.01"
+    },
+    "custos": {
+      "custo_fixo": "0",
+      "taxa_proporcional": "0.005",
+      "tratamento_taxa": "cobrada_na_cotacao"
+    },
+    "recursos": {
+      "orcamento": "1000",
+      "moeda_orcamento_id": "usd",
+      "saldo_reservado": "1000",
+      "exposicao_maxima": "1"
+    },
+    "regras": {
+      "bloqueios": [
+        {
+          "id": "bq-preco",
+          "op": "gt",
+          "esquerda": {
+            "tipo": "metrica",
+            "metrica_id": "preco_executavel",
+            "ativo_id": "tokx",
+            "mercado_id": "bolsa-a",
+            "janela_segundos": null
+          },
+          "direita": {
+            "tipo": "valor",
+            "valor": "0",
+            "unidade": "USD"
+          }
+        }
+      ],
+      "entrada": [
+        {
+          "id": "en-preco",
+          "op": "lte",
+          "esquerda": {
+            "tipo": "metrica",
+            "metrica_id": "preco_executavel",
+            "ativo_id": "tokx",
+            "mercado_id": "bolsa-a",
+            "janela_segundos": null
+          },
+          "direita": {
+            "tipo": "valor",
+            "valor": "9.9",
+            "unidade": "USD"
+          }
+        }
+      ],
+      "invalidacao": [
+        {
+          "id": "inv-queda",
+          "op": "lt",
+          "esquerda": {
+            "tipo": "metrica",
+            "metrica_id": "retorno_7d",
+            "ativo_id": "tokx",
+            "mercado_id": "bolsa-a",
+            "janela_segundos": 604800
+          },
+          "direita": {
+            "tipo": "valor",
+            "valor": "-0.30",
+            "unidade": "razao"
+          }
+        }
+      ]
+    },
+    "politicas": {
+      "carencia_dados_segundos": 7200,
+      "ordem_empate": [
+        "atingida",
+        "invalidada",
+        "expirada",
+        "entrada"
+      ],
+      "validades": [
+        {
+          "metrica_id": "preco_executavel",
+          "validade_maxima_segundos": 86400
+        },
+        {
+          "metrica_id": "retorno_7d",
+          "validade_maxima_segundos": 86400
+        }
+      ],
+      "tolerancias": []
+    },
+    "fundamentacao": {
+      "cenarios_origem": [
+        "cen-referencia"
+      ],
+      "justificativa": "Cenário de reprodução (simulado).",
+      "aprovacoes": []
+    },
+    "reprodutibilidade": {
+      "versao_politica": "politica-1",
+      "versao_catalogo": "catalogo-1",
+      "versao_algoritmo": "motor-0.3.0"
+    }
+  },
+  "ativada_em": "2026-10-20T08:00:00Z",
+  "responsavel": "Pessoa de exemplo",
+  "politica_conciliacao": {
+    "janela_atraso_segundos": 3600,
+    "tolerancia_horario_segundos": 60,
+    "janela_candidatos_segundos": 0,
+    "tolerancia_preco_relativa": "0",
+    "tolerancias_quantidade": {},
+    "tolerancia_quantidade_padrao": "0",
+    "tolerancia_saldo": "0",
+    "orfaos_bloqueiam_confirmacao": true,
+    "fontes_autorizadas": [
+      {
+        "conta_id": "conta-a",
+        "mercado_id": "bolsa-a",
+        "fonte_id": "corretora-sim"
+      }
+    ]
+  },
+  "execucoes": [],
+  "registros_externos": [],
+  "coberturas_execucoes": [],
+  "movimentacoes": [],
+  "saldos": [],
+  "coberturas": [],
+  "vinculos_manuais": [],
+  "observacoes": [
+    {
+      "id": "o-preco-0",
+      "ativo_id": "tokx",
+      "metrica_id": "preco_executavel",
+      "fonte_id": "fonte-sim",
+      "mercado_id": "bolsa-a",
+      "unidade": "USD",
+      "valor": "12",
+      "qualidade": "disponivel",
+      "origem": "simulado",
+      "motivo_ausencia": null,
+      "observado_em": "2026-10-20T08:30:00Z",
+      "coletado_em": "2026-10-20T08:30:00Z",
+      "periodo_inicio": null,
+      "periodo_fim": null
+    },
+    {
+      "id": "o-ret-0",
+      "ativo_id": "tokx",
+      "metrica_id": "retorno_7d",
+      "fonte_id": "fonte-sim",
+      "mercado_id": "bolsa-a",
+      "unidade": "razao",
+      "valor": "0.01",
+      "qualidade": "disponivel",
+      "origem": "simulado",
+      "motivo_ausencia": null,
+      "observado_em": "2026-10-20T08:30:00Z",
+      "coletado_em": "2026-10-20T08:30:00Z",
+      "periodo_inicio": null,
+      "periodo_fim": null
+    }
+  ],
+  "momentos": [
+    {
+      "agora": "2026-10-20T14:00:00Z",
+      "ocultar": [],
+      "esperado": {
+        "estado": "atingida",
+        "eventos": [],
+        "eventos_conciliacao": [],
+        "quantidade_comprovada": "10.05",
+        "quantidade_preservada": null,
+        "completa": null,
+        "elegibilidade": null,
+        "motivos_elegibilidade": [],
+        "orcamento": null,
+        "bloqueada_por_dados": null,
+        "aguardando_evidencia": null,
+        "em_carencia": null,
+        "orfaos_relevantes": null,
+        "orfaos_ignorados": null,
+        "evidencia_em": {},
+        "motivo_evento": {}
+      }
+    }
+  ]
+}

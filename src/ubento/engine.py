@@ -14,7 +14,7 @@ from datetime import date, datetime
 
 from .agent_config import AgentConfig
 from .formatting import number, pct
-from .store import ASSETS, CRYPTO_ORDER, Decision, Store, Trade
+from .store import ASSETS, CRYPTO_ORDER, TRADE_FEE_RATE, Decision, Store, Trade
 
 MIN_TRADE_USD = 10.0
 
@@ -26,9 +26,15 @@ def momentum(symbol: str, day: date) -> float:
 
 
 def _trade(side: str, symbol: str, usd: float) -> Trade:
+    """Compra: `usd` é o caixa que sai; a taxa sai do que se recebe (unidades líquidas). Venda: `usd` é qty × preço; a taxa sai do que entra."""
     asset = ASSETS[symbol]
+    if side == "buy":
+        taxa = round(usd * TRADE_FEE_RATE, 2)
+        qty = round((usd - taxa) / asset.price, asset.decimals)
+        return Trade(side, symbol, qty, round(usd, 2), taxa)
     qty = round(usd / asset.price, asset.decimals)
-    return Trade(side, symbol, qty, round(qty * asset.price, 2))
+    valor = round(qty * asset.price, 2)
+    return Trade(side, symbol, qty, valor, round(valor * TRADE_FEE_RATE, 2))
 
 
 def _effect(trade: Trade) -> str:
@@ -38,12 +44,12 @@ def _effect(trade: Trade) -> str:
 
 def _buy(symbol: str, usd: float, detail: str, now: datetime, kind: str = "buy", title: str | None = None) -> Decision:
     t = _trade("buy", symbol, usd)
-    return Decision(kind, title or f"Comprou {symbol}", detail, _effect(t), now, trade=t)
+    return Decision(kind, title or f"Comprou {symbol}", detail, _effect(t), now, trade=t, value_usd=t.usd, fee_usd=t.fee, pnl_realizado=False)
 
 
 def _sell(symbol: str, usd: float, detail: str, now: datetime, kind: str = "sell", title: str | None = None) -> Decision:
     t = _trade("sell", symbol, usd)
-    return Decision(kind, title or f"Vendeu {symbol}", detail, _effect(t), now, trade=t)
+    return Decision(kind, title or f"Vendeu {symbol}", detail, _effect(t), now, trade=t, value_usd=t.usd, fee_usd=t.fee)
 
 
 def _hold(title: str, detail: str, now: datetime) -> Decision:

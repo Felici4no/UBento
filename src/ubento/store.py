@@ -17,6 +17,7 @@ from PySide6.QtCore import QObject, Signal
 
 SERVICE_FEE_RATE = 0.023
 GAS_FEE_USD = 1.32
+TRADE_FEE_RATE = 0.001  # taxa de 0,10% sobre cada compra/venda dos agentes (demonstração)
 
 
 @dataclass(frozen=True)
@@ -69,8 +70,9 @@ class Trade:
 
     side: str  # 'buy' | 'sell'
     symbol: str
-    qty: float
-    usd: float
+    qty: float  # unidades que entram (compra, já líquidas da taxa) ou saem (venda)
+    usd: float  # valor negociado: o caixa que sai numa compra; qty × preço numa venda
+    fee: float = 0.0  # taxa em USD. Na compra sai do que se recebe; na venda sai do que entra no caixa
 
 
 @dataclass(frozen=True)
@@ -86,20 +88,25 @@ class Decision:
     status: str = "executed"  # 'executed' | 'proposed' | 'approved' | 'rejected' | 'suggested'
     trade: Trade | None = None
     uid: str = field(default_factory=lambda: uuid4().hex[:10])
+    # Livro da decisão (None = sem dinheiro movimentado). `pnl_usd` já é LÍQUIDO da taxa: valor recebido − custo do que foi dado.
+    value_usd: float | None = None  # valor movimentado (o que foi aplicado)
+    fee_usd: float = 0.0
+    pnl_usd: float | None = None  # só existe depois de executada; antes disso a decisão só tem valor e taxa estimados
+    pnl_realizado: bool = True  # venda/troca realizam o resultado; compra deixa a posição em aberto
 
 
-# (tipo, título, justificativa, efeito)
-DECISION_POOL: list[tuple[str, str, str, str]] = [
-    ("buy", "Comprou ETH", "Preço 6% abaixo da média de 30 dias", "+ 0,50000 ETH"),
-    ("buy", "Comprou SOL", "Rompimento de resistência com volume alto", "+ 3,0000 SOL"),
-    ("buy", "Comprou USDC", "Aumentou a reserva em dólar", "+ 500,00 USDC"),
-    ("sell", "Vendeu AVAX", "Realização de lucro após alta de 12%", "- 4,000 AVAX"),
-    ("sell", "Vendeu BNB", "Reduziu exposição por volatilidade", "- 0,2000 BNB"),
-    ("sell", "Vendeu SOL", "Stop acionado em −5%", "- 2,0000 SOL"),
-    ("hold", "Manteve ETH", "Sem sinal claro; aguardando próxima janela", ""),
-    ("hold", "Manteve USDT", "Reserva de caixa dentro da meta", ""),
-    ("rebalance", "Rebalanceou a carteira", "ETH passou de 80% do total", ""),
-    ("rebalance", "Ajustou a alocação", "Voltou à meta de risco definida", ""),
+# (tipo, título, justificativa, efeito, ativo, quantidade, resultado da venda como fração do valor vendido, já antes da taxa)
+DECISION_POOL: list[tuple[str, str, str, str, str | None, float, float | None]] = [
+    ("buy", "Comprou ETH", "Preço 6% abaixo da média de 30 dias", "+ 0,50000 ETH", "ETH", 0.50000, None),
+    ("buy", "Comprou SOL", "Rompimento de resistência com volume alto", "+ 3,0000 SOL", "SOL", 3.0000, None),
+    ("buy", "Comprou USDC", "Aumentou a reserva em dólar", "+ 500,00 USDC", "USDC", 500.0, None),
+    ("sell", "Vendeu AVAX", "Realização de lucro após alta de 12%", "- 4,000 AVAX", "AVAX", 4.000, 0.107),
+    ("sell", "Vendeu BNB", "Reduziu exposição por volatilidade", "- 0,2000 BNB", "BNB", 0.2000, 0.012),
+    ("sell", "Vendeu SOL", "Stop acionado em −5%", "- 2,0000 SOL", "SOL", 2.0000, -0.05),
+    ("hold", "Manteve ETH", "Sem sinal claro; aguardando próxima janela", "", None, 0.0, None),
+    ("hold", "Manteve USDT", "Reserva de caixa dentro da meta", "", None, 0.0, None),
+    ("rebalance", "Rebalanceou a carteira", "ETH passou de 80% do total", "", None, 0.0, None),
+    ("rebalance", "Ajustou a alocação", "Voltou à meta de risco definida", "", None, 0.0, None),
 ]
 
 
@@ -107,8 +114,16 @@ def demo_decisions(seed: str, now: datetime) -> list[Decision]:
     rng = random.Random(f"ubento-{seed}-decisions")
     picks = rng.sample(DECISION_POOL, 8)
     out, when = [], now - timedelta(minutes=rng.randint(20, 150))
-    for kind, title, detail, amount in picks:
-        out.append(Decision(kind, title, detail, amount, when))
+    for kind, title, detail, amount, symbol, qty, ganho in picks:
+        livro: dict = {}
+        if symbol:  # o histórico de demonstração também traz valor, taxa e resultado, no mesmo critério das decisões executadas agora
+            valor = round(qty * ASSETS[symbol].price, 2)
+            taxa = round(valor * TRADE_FEE_RATE, 2)
+            if kind == "buy":
+                livro = dict(value_usd=valor, fee_usd=taxa, pnl_usd=-taxa, pnl_realizado=False)  # em aberto: no ato só se perdeu a taxa
+            else:
+                livro = dict(value_usd=valor, fee_usd=taxa, pnl_usd=round(valor * (ganho or 0.0) - taxa, 2))
+        out.append(Decision(kind, title, detail, amount, when, **livro))
         when -= timedelta(hours=rng.randint(5, 30), minutes=rng.randint(0, 59))
     return out
 
@@ -141,6 +156,11 @@ class Store(QObject):
         scale = self.scale
         base = {"USD": 6900.00, "ETH": 2.9934, "SOL": 6.5, "AVAX": 14.0, "BNB": 0.45, "USDT": 881.0, "USDC": 364.12}
         self.holdings: dict[str, float] = {k: round(v * scale, 8) for k, v in base.items()}
+        # custo de aquisição (USD) do que está em carteira: base para o resultado realizado das vendas. Demonstração: o preço de entrada
+        # de cada ativo é 22% abaixo a 18% acima do preço atual, de forma determinística por agente.
+        self.cost_basis: dict[str, float] = {
+            s: round(q * ASSETS[s].price * random.Random(f"ubento-basis-{self.seed}-{s}").uniform(0.82, 1.18), 8) for s, q in self.holdings.items() if s != "USD"
+        }
         self.spent = 1144.0 * scale
         self.income = 3226.0 * scale
         self.crypto_change = 1.7
@@ -233,23 +253,44 @@ class Store(QObject):
 
     def apply_trade(self, trade: Trade) -> bool:
         """Aplica uma compra/venda aos saldos. Falso (sem alterar nada) se faltar saldo."""
+        return self.executar_trade(trade) is not None
+
+    def executar_trade(self, trade: Trade) -> float | None:
+        """Aplica a compra/venda e devolve o RESULTADO em USD, líquido da taxa (valor recebido − custo do que foi dado).
+        Compra: sai `usd` do caixa e entram unidades já líquidas da taxa, então o resultado no ato é −taxa (posição em aberto).
+        Venda: entra `usd − taxa` no caixa e o custo das unidades vendidas sai do custo médio. None (sem alterar nada) se faltar saldo."""
         if trade.side == "buy":
             if self.holdings.get("USD", 0.0) + 1e-9 < trade.usd:
-                return False
+                return None
             self.holdings["USD"] = round(self.holdings["USD"] - trade.usd, 8)
             self.holdings[trade.symbol] = round(self.holdings.get(trade.symbol, 0.0) + trade.qty, 8)
-        else:
-            if self.holdings.get(trade.symbol, 0.0) + 1e-9 < trade.qty:
-                return False
-            self.holdings[trade.symbol] = round(self.holdings[trade.symbol] - trade.qty, 8)
-            self.holdings["USD"] = round(self.holdings.get("USD", 0.0) + trade.usd, 8)
-        return True
+            self.cost_basis[trade.symbol] = round(self.cost_basis.get(trade.symbol, 0.0) + trade.usd, 8)  # o custo inclui a taxa paga
+            return -trade.fee  # o custo de entrar é a taxa (as unidades já vêm líquidas dela)
+        em_carteira = self.holdings.get(trade.symbol, 0.0)
+        if em_carteira + 1e-9 < trade.qty:
+            return None
+        custo = self.cost_basis.get(trade.symbol, 0.0) * (trade.qty / em_carteira if em_carteira else 0.0)
+        self.cost_basis[trade.symbol] = round(self.cost_basis.get(trade.symbol, 0.0) - custo, 8)
+        self.holdings[trade.symbol] = round(em_carteira - trade.qty, 8)
+        recebido = trade.usd - trade.fee
+        self.holdings["USD"] = round(self.holdings.get("USD", 0.0) + recebido, 8)
+        return round(recebido - custo, 2)
+
+    @staticmethod
+    def _com_livro(d: Decision, pnl: float | None) -> Decision:
+        """Preenche valor, taxa e resultado de uma decisão com movimento. Sem movimento (manter, rebalancear sem ordem) fica como está."""
+        if d.trade is None:
+            return d
+        return replace(d, value_usd=d.trade.usd, fee_usd=d.trade.fee, pnl_usd=pnl, pnl_realizado=d.trade.side == "sell")
 
     def add_decision(self, decision: Decision) -> str | None:
         """Registra uma decisão no topo da lista; executa o movimento se ela já nasce executada."""
-        if decision.status == "executed" and decision.trade and not self.apply_trade(decision.trade):
-            return "Saldo insuficiente"
-        self.decisions.insert(0, decision)
+        pnl = None
+        if decision.status == "executed" and decision.trade:
+            pnl = self.executar_trade(decision.trade)
+            if pnl is None:
+                return "Saldo insuficiente"
+        self.decisions.insert(0, self._com_livro(decision, pnl))
         self.changed.emit()
         return None
 
@@ -273,9 +314,12 @@ class Store(QObject):
         if index is None or self.decisions[index].status != "approved":
             return "Só uma decisão aprovada pode ter a execução registrada"
         d = self.decisions[index]
-        if d.trade and not self.apply_trade(d.trade):
-            return "Saldo insuficiente para registrar a execução"
-        self.decisions[index] = replace(d, status="executed", moment=now or datetime.now())
+        pnl = None
+        if d.trade:
+            pnl = self.executar_trade(d.trade)
+            if pnl is None:
+                return "Saldo insuficiente para registrar a execução"
+        self.decisions[index] = replace(self._com_livro(d, pnl), status="executed", moment=now or datetime.now())
         self.changed.emit()
         return None
 
@@ -318,11 +362,22 @@ class Store(QObject):
         if problem:
             return problem
         q = self.quote(send, receive, amount)
+        # troca = baixa do que se deu (pelo custo médio) + entrada do que se recebeu (pelo valor de mercado): o resultado já sai líquido das taxas
+        em_carteira = self.holdings[send]
+        custo = amount if send == "USD" else self.cost_basis.get(send, 0.0) * (amount / em_carteira if em_carteira else 0.0)
+        if send != "USD":
+            self.cost_basis[send] = round(self.cost_basis.get(send, 0.0) - custo, 8)
+        recebido_usd = q.receive_amount * ASSETS[receive].price
+        if receive != "USD":
+            self.cost_basis[receive] = round(self.cost_basis.get(receive, 0.0) + recebido_usd, 8)
         self.holdings[send] = round(self.holdings[send] - amount, 8)
         self.holdings[receive] = round(self.holdings.get(receive, 0.0) + q.receive_amount, 8)
         decimals = ASSETS[receive].decimals
         effect = f"+ {q.receive_amount:,.{decimals}f} {receive}".replace(",", "X").replace(".", ",").replace("X", ".")
-        self.decisions.insert(0, Decision("swap", f"Swap {send} → {receive}", "Executado manualmente por você", effect, datetime.now()))
+        self.decisions.insert(0, Decision(
+            "swap", f"Swap {send} → {receive}", "Executado manualmente por você", effect, datetime.now(),
+            value_usd=round(q.value_usd, 2), fee_usd=round(q.service_fee_usd + q.gas_fee_usd, 2), pnl_usd=round(recebido_usd - custo, 2), pnl_realizado=True,
+        ))
         today = datetime.now().date()
         self.activity[today] = self.activity.get(today, 0) + 1
         self.changed.emit()
