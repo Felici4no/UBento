@@ -5,6 +5,10 @@ Objetivo deste texto: dizer o que o documento já resolve, o que ele deixa em ab
 como transformar o resto em um núcleo Python testável, que sirva de base para os models
 (Análise, Meta, Avaliação, Evento…) e depois alimente o UBento.
 
+> **Atualização (18/10/2026):** as decisões D1–D5 e as duas correções técnicas (hash canônico e arredondamento
+> por restrição) foram fechadas e estão em [`ESPECIFICACAO_NUCLEO.md`](ESPECIFICACAO_NUCLEO.md). Onde este texto
+> divergir dele (seção 3.1, D6 e D7), vale a especificação. O restante continua como análise e roadmap.
+
 ## 1. Veredito
 
 A especificação está **boa o bastante para começar a implementar o núcleo**, desde que

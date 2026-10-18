@@ -26,6 +26,18 @@ python -m ubento
 
 Testes: `pytest`. Captura de tela para conferir o visual: `python scripts/screenshot.py saida.png`.
 
+## Núcleo de metas (em construção)
+
+`src/ubento/nucleo` é o núcleo determinístico de análises e metas: tipos estritos (`Decimal`, UTC), esquema
+Pydantic, carregamento seguro de YAML/JSON e hash canônico do contrato. Não depende de Qt, rede nem do relógio
+do sistema. Contrato e decisões em [`docs/ESPECIFICACAO_NUCLEO.md`](docs/ESPECIFICACAO_NUCLEO.md); análise e
+roadmap em [`docs/ANALISE_META_MOTOR.md`](docs/ANALISE_META_MOTOR.md); documentos de exemplo (dados simulados) em
+`exemplos/nucleo/`.
+
+```bash
+pytest tests/nucleo          # inclui testes de propriedade (Hypothesis)
+```
+
 ## Instalador (Windows)
 
 ```powershell
@@ -39,7 +51,8 @@ estiver instalado, `Output\UBento-Setup-<versão>.exe`.
 
 ```
 src/ubento/
-  store.py        estado em memória + lógica de troca (será trocado por SQLite)
+  nucleo/         núcleo de análises e metas (sem Qt)
+  store.py        estado em memória + lógica de troca (demonstração)
   formatting.py   números, moeda e datas em pt-BR
   ui/
     theme.py      cores, fontes, QSS global
