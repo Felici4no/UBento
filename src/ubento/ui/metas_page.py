@@ -12,13 +12,17 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
-from ..metas import PainelMeta, ServicoMetas
+from ..metas import (
+    COMPROVADA, PENDENTE_DE_COMPROVACAO, REVERTIDA, EvidenciaExterna, PainelMeta, ServicoMetas,
+)
+from ..nucleo.carregador import carregar_arquivo
 from ..nucleo.esquema import EstadoMeta
 from ..nucleo.tipos import Tri
 from ..workspace import Workspace
 from . import theme
 from .components import ActionButton, Card, Label, PillButton, setup
 from .controls import Chip
+from .execucao_dialog import ExecucaoDialog
 
 W = theme.W
 
@@ -126,6 +130,10 @@ class MetasPage(QWidget):
         self.avancar.clicked.connect(self._avancar)
         self.reavaliar = ActionButton("Reavaliar", height=38, pad=18)
         self.reavaliar.clicked.connect(self._reavaliar)
+        self.registrar = ActionButton("Registrar execução…", height=38, pad=18)
+        self.registrar.clicked.connect(self._registrar)
+        self.evidencia = ActionButton("Importar evidência…", height=38, pad=18)
+        self.evidencia.clicked.connect(self._importar_evidencia)
 
         self.corpo = QVBoxLayout()
         self.corpo.setSpacing(16)
@@ -140,6 +148,11 @@ class MetasPage(QWidget):
         acoes.addWidget(self.reavaliar)
         acoes.addWidget(self.importar)
         acoes.addStretch(1)
+        acoes2 = QHBoxLayout()
+        acoes2.setSpacing(10)
+        acoes2.addWidget(self.registrar)
+        acoes2.addWidget(self.evidencia)
+        acoes2.addStretch(1)
 
         coluna = QVBoxLayout()
         coluna.setSpacing(16)
@@ -148,6 +161,7 @@ class MetasPage(QWidget):
         coluna.addWidget(self.title)
         coluna.addWidget(self.subtitle)
         coluna.addLayout(acoes)
+        coluna.addLayout(acoes2)
         coluna.addLayout(self.corpo)
         coluna.addStretch(1)
         holder = QWidget()
@@ -177,6 +191,45 @@ class MetasPage(QWidget):
             self.notify.emit(f"Cenário recusado: {str(erro).splitlines()[0][:120]}", False)
             return
         self.notify.emit("Meta ativada (cenário simulado)", True)
+        self.refresh()
+
+    def criar_formulario(self) -> ExecucaoDialog | None:
+        if self.meta_id is None:
+            return None
+        return ExecucaoDialog(self.servico.painel(self.meta_id), self._gravar_execucao, self)
+
+    def _registrar(self) -> None:
+        dialogo = self.criar_formulario()
+        if dialogo is not None:
+            dialogo.exec()
+
+    def _gravar_execucao(self, execucao) -> bool:
+        """Chamado pelo formulário: grava e reavalia. Erros sobem para o formulário, que continua aberto."""
+        nova = self.servico.registrar_execucao(self.meta_id, execucao)
+        if nova:
+            self.servico.reavaliar(self.meta_id, execucao.confirmada_em)
+            self.notify.emit("Execução registrada, pendente de comprovação (ainda não é prova)", True)
+        else:
+            self.notify.emit("Esta execução já estava registrada. Nada foi duplicado", True)
+        self.refresh()
+        return nova
+
+    def _importar_evidencia(self) -> None:
+        caminho, _ = QFileDialog.getOpenFileName(self, "Importar evidência externa", "", "Evidência (*.yaml *.yml *.json)")
+        if caminho:
+            self.importar_evidencia_arquivo(caminho)
+
+    def importar_evidencia_arquivo(self, caminho: str) -> None:
+        if self.meta_id is None:
+            return
+        try:
+            evidencia = carregar_arquivo(EvidenciaExterna, caminho)
+            novos = self.servico.importar_evidencia(self.meta_id, evidencia)
+            self.servico.reavaliar(self.meta_id, max((r.recebido_em for r in evidencia.registros_externos), default=None))
+        except Exception as erro:
+            self.notify.emit(f"Evidência recusada: {str(erro).splitlines()[0][:120]}", False)
+            return
+        self.notify.emit(f"{novos} registro(s) externo(s) novo(s). A conciliação decide o que comprova" if novos else "Evidência já importada. Nada foi duplicado", True)
         self.refresh()
 
     def _avancar(self) -> None:
@@ -217,9 +270,13 @@ class MetasPage(QWidget):
         while self.corpo.count():
             item = self.corpo.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                antigo = item.widget()
+                antigo.setParent(None)  # sai da tela já; a destruição é adiada
+                antigo.deleteLater()
         self.avancar.setEnabled(False)
         self.reavaliar.setEnabled(False)
+        self.registrar.setEnabled(self.meta_id is not None)
+        self.evidencia.setEnabled(self.meta_id is not None)
         if self.meta_id is None:
             card, v = _bloco("NENHUMA META")
             v.addWidget(_texto("Este agente ainda não tem meta. Importe um cenário simulado para ver a avaliação passo a passo.", theme.TEXT, 15))
@@ -287,8 +344,7 @@ class MetasPage(QWidget):
         v.addWidget(_linha("Comprovado (líquido, dentro da janela)", f"{num(p.quantidade_comprovada)} de {num(p.quantidade_alvo)} {painel.ativo_id}", theme.TEXT))
         if p.quantidade_preservada:
             v.addWidget(_linha("Vale por prova anterior, sem reverificação agora", num(p.quantidade_preservada), theme.WARNING))
-        if p.quantidade_pendente:
-            v.addWidget(_linha("Declarado e ainda não comprovado", num(p.quantidade_pendente), theme.WARNING))
+        v.addWidget(_linha("Registrado, pendente de comprovação (NÃO conta como progresso)", num(p.quantidade_pendente), theme.WARNING if p.quantidade_pendente else theme.DIM))
         if p.quantidade_fora_da_janela:
             v.addWidget(_linha("Comprovado, mas fora da janela da meta (não conta)", num(p.quantidade_fora_da_janela)))
         if p.instante_atingimento:
@@ -309,6 +365,7 @@ class MetasPage(QWidget):
         if ignorados:
             v.addWidget(_texto(f"{len(ignorados)} registro(s) externo(s) sem relação com esta meta, ignorados.", theme.DIM))
         blocos.append(concl)
+        blocos.append(self._execucoes(painel))
 
         custos, v = _bloco("CUSTOS E ORÇAMENTO")
         for c in p.custos:
@@ -331,6 +388,24 @@ class MetasPage(QWidget):
         blocos.append(elig)
         blocos.append(self._historia(painel))
         return blocos
+
+    def _execucoes(self, painel: PainelMeta) -> QWidget:
+        card, v = _bloco("EXECUÇÕES REGISTRADAS")
+        if not painel.execucoes:
+            v.addWidget(_texto("Nenhuma execução registrada ainda. Use “Registrar execução…”."))
+        rotulos = {COMPROVADA: ("Comprovada", theme.GREEN), PENDENTE_DE_COMPROVACAO: ("Pendente de comprovação", theme.WARNING), REVERTIDA: ("Comprovação revertida", theme.RED)}
+        for r in painel.execucoes:
+            e = r.execucao
+            rotulo, cor = rotulos.get(r.situacao, ("Ainda não avaliada", theme.DIM))
+            sinal = "−" if e.lado.value == "estorno_compra" else "+"
+            linha = QWidget()
+            h = QHBoxLayout(linha)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.addWidget(Label(f"{e.id}  ·  {sinal}{num(e.quantidade_liquida)} {e.ativo_id}  ·  {e.executada_em:%d/%m %H:%M} UTC", 14, W.Normal, theme.TEXT))
+            h.addStretch(1)
+            h.addWidget(Chip(rotulo, cor))
+            v.addWidget(linha)
+        return card
 
     def _historia(self, painel: PainelMeta) -> QWidget:
         card, v = _bloco("LINHA DO TEMPO")

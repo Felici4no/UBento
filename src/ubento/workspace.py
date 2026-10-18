@@ -49,6 +49,7 @@ class Workspace(QObject):
         self.overview = Store.combined([])
         if not self._load():
             self.agents = self._default_agents()
+            self._save()  # os ids são aleatórios: sem gravar já na 1ª execução, as metas ficariam órfãs depois de reiniciar
         self._refresh_overview()
         formatting.set_hidden(bool(self.prefs["hide_values"]))
 

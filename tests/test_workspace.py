@@ -58,3 +58,13 @@ def test_restore_defaults_and_demo_reset():
     store.execute("USD", "ETH", 500)
     ws.reset_demo_data()
     assert store.holdings["USD"] == 6900.0
+
+
+def test_ids_dos_agentes_padrao_sobrevivem_a_reinicio_sem_nenhuma_alteracao(tmp_path):
+    """Metas se ligam ao id do agente. Se o id padrão (aleatório) não fosse gravado, reiniciar deixaria as metas órfãs."""
+    from PySide6.QtCore import QSettings
+
+    caminho = str(tmp_path / "ws.ini")
+    primeira = Workspace(QSettings(caminho, QSettings.Format.IniFormat))
+    segunda = Workspace(QSettings(caminho, QSettings.Format.IniFormat))
+    assert [a.id for a in primeira.agents] == [a.id for a in segunda.agents]

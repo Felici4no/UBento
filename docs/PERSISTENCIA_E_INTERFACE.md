@@ -31,11 +31,19 @@ Liga o núcleo puro ao SQLite e à tela. Nada disto vive em `ubento.nucleo`: o n
 
 Pendências do agente (`pending_count`, ponto no header e chip “N pendentes”) incluem propostas **e** aprovadas sem execução registrada.
 
-**Limite desta fase:** a execução registrada aqui é a do **demonstrativo de carteira** (`Store`). O registro de uma `Execucao` de **meta** existe no serviço (`ServicoMetas.registrar_execucao`) e é coberto por testes, mas ainda não há formulário na tela: no UI as metas são alimentadas por cenários simulados importados. O modo “automático” do agente de demonstração continua simulando a execução na hora; isso é demonstração, não o contrato.
+**Duas coisas diferentes com o mesmo verbo.** Na carteira de demonstração (`Store`), “Registrar” aplica a operação aprovada aos saldos. Numa **meta**, “Registrar execução…” (formulário, §4) cria uma `Execucao` *registrada*: confirmação interna, **sem valor de prova**. O modo “automático” do agente de demonstração continua simulando a execução na hora; isso é demonstração, não o contrato.
 
 ## 4. Tela de Metas
 
-Acesso: botão **Metas** na faixa do agente ou botão direito na aba → “Metas…”. Mostra, **separados**: progresso comprovado (e o que vale por prova anterior), completude da conciliação (pendências, órfãos relevantes/ignorados), custos verificados × sem evidência com orçamento mínimo–máximo, elegibilidade para concluir, e a linha do tempo de eventos. Ações: importar cenário (dado simulado, marcado como tal), avançar momento, reavaliar.
+Acesso: botão **Metas** na faixa do agente ou botão direito na aba → “Metas…”. Mostra, **separados**: progresso comprovado (e o que vale por prova anterior), **quantidade registrada pendente de comprovação**, completude da conciliação (pendências, órfãos), execuções registradas com sua situação, custos verificados × sem evidência com orçamento mínimo–máximo, elegibilidade para concluir e a linha do tempo. Ações: importar cenário (dado simulado, marcado como tal), avançar momento, reavaliar, **registrar execução** e **importar evidência**.
+
+### Registrar execução → comprovar
+1. **Formulário.** Ativo e moeda de cotação vêm da meta (somente leitura), com unidade em cada campo; horários em UTC (`AAAA-MM-DD HH:MM`); a quantidade líquida é calculada (bruta − taxa no ativo), nunca digitada. Informe a **fonte e o id do registro externo**: sem eles a execução não poderá ser comprovada.
+2. **Validação.** Formato (decimal com ponto ou vírgula, sem notação científica) e as regras do núcleo (`Execucao`). Regras do serviço: ativo igual ao da meta; estorno só de compra já registrada; o mesmo registro externo não vincula duas execuções da meta. Erros aparecem no próprio formulário e **nada digitado é perdido**.
+3. **Duplicidade.** Reenviar os mesmos dados não grava nada (“já estava registrada”); reutilizar o id com dados diferentes é recusado (registros não são editados).
+4. **Depois de salvar:** a execução aparece como **registrada, pendente de comprovação** e o progresso comprovado não muda.
+5. **Importar evidência** (`EvidenciaExterna`: registros externos + cobertura) e reavaliar: só se a conciliação casar o registro externo com a execução ela vira **comprovada** e entra no progresso. Reimportar o mesmo arquivo não duplica.
+6. As avaliações usam como instante o mais tardio entre a última avaliação e o registro/recebimento novo (nunca o relógio do sistema).
 
 ## 5. Onde fica o banco
 
@@ -43,4 +51,4 @@ Acesso: botão **Metas** na faixa do agente ou botão direito na aba → “Meta
 
 ## 6. Ainda isolado
 
-Monitor/agendamento e adaptadores de dados reais; formulário de execução de meta; conversão entre moedas; cancelamento de meta pela tela.
+Monitor/agendamento e adaptadores de dados reais; conversão entre moedas; cancelamento de meta pela tela; edição ou remoção de registros (por desenho: correções são novos registros/estornos).
