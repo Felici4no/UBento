@@ -42,6 +42,8 @@ O **avaliador de metas** (`ubento.nucleo.avaliacao`) integra execução → conc
 carência, escopo de órfãos, orçamento com pior caso e reconciliação posterior. Contrato em
 [`docs/AVALIACAO_META.md`](docs/AVALIACAO_META.md); metas acompanhadas de ponta a ponta com dados simulados em `exemplos/avaliacao/`.
 
+O **MCP local** (somente consulta, `python -m ubento.mcp_local`) está em [`docs/MCP_LOCAL.md`](docs/MCP_LOCAL.md).
+
 A **persistência** (SQLite append-only, fora do núcleo) e a **tela de Metas** estão descritas em
 [`docs/PERSISTENCIA_E_INTERFACE.md`](docs/PERSISTENCIA_E_INTERFACE.md). Aprovar uma proposta (✓) não executa nada: a execução é registrada à parte.
 

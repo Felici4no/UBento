@@ -348,3 +348,50 @@ def test_correcao_pela_interface_com_meta_atingida_e_reinicio(tmp_path):
     assert "substituído por Marina" in textos(page)
     janela.close()
     janela.metas.repo.fechar()
+
+
+# -- reavaliação de todas as metas afetadas ------------------------------------------------------------------------------------
+
+
+def orfaos_relevantes(sv, mid):
+    return sorted(o.id_externo for o in sv.painel(mid).progresso.orfaos if o.relevante)
+
+
+def test_vincular_revogar_e_substituir_reavaliam_as_outras_metas_que_enxergam_o_registro():
+    sv, a, *_ = base()
+    _, b, *_ = base(sv, meta_id="meta-b")
+    T = carregar_reproducao_meta(CENARIO).momentos[-1].agora
+    sv.avaliar(b, T)  # b já tem avaliação; tem os mesmos registros importados e nenhuma execução vinculada
+    assert "fill-1" in orfaos_relevantes(sv, b)
+    n0 = len(sv.repo.avaliacoes(b))
+
+    vincular(sv, a, 1)  # a REIVINDICA fill-1: para b ele deixa de ser órfão
+    assert len(sv.repo.avaliacoes(b)) > n0 and "fill-1" not in orfaos_relevantes(sv, b)
+    n1 = len(sv.repo.avaliacoes(b))
+
+    sv.revogar_vinculo(a, "ex-1", "corretora-sim", "fill-1", "Marina", JUST2)  # a LIBERA fill-1: volta a ser órfão em b
+    assert len(sv.repo.avaliacoes(b)) > n1 and "fill-1" in orfaos_relevantes(sv, b)
+    n2 = len(sv.repo.avaliacoes(b))
+
+    vincular(sv, a, 1, registro="fill-3", autor="Marina", just="Engano anterior; este é o registro correto.")
+    sv.substituir_vinculo(a, "ex-1", "corretora-sim", "fill-3", "corretora-sim", "fill-1", "Marina", JUST2)  # libera fill-3 e toma fill-1
+    assert len(sv.repo.avaliacoes(b)) > n2
+    assert "fill-3" in orfaos_relevantes(sv, b) and "fill-1" not in orfaos_relevantes(sv, b)
+
+
+def test_revogar_resolve_a_disputa_da_outra_meta():
+    """Duas metas com vínculo ao MESMO registro (gravados por fora do serviço): as duas ficam em revisão. Revogar numa libera a outra."""
+    sv, a, *_ = base()
+    _, b, *_ = base(sv, meta_id="meta-b")
+    T = carregar_reproducao_meta(CENARIO).momentos[-1].agora
+    for m in (a, b):
+        sv.repo.registrar_entrada(m, "vinculos_manuais", VinculoManual(execucao_id="ex-1", fonte_id="corretora-sim", id_externo="fill-1", autor="Lucas", justificativa=JUST, em=T))
+    for m in (a, b):
+        assert sv.avaliar(m, T + timedelta(seconds=1)).progresso.quantidade_comprovada == 0  # a mesma compra reivindicada duas vezes: nenhuma conta
+    n_b = len(sv.repo.avaliacoes(b))
+
+    sv.revogar_vinculo(a, "ex-1", "corretora-sim", "fill-1", "Marina", JUST2)
+
+    assert len(sv.repo.avaliacoes(b)) > n_b  # b foi reavaliada sem ninguém pedir
+    assert sv.painel(b).progresso.quantidade_comprovada == Decimal("3.98")
+    assert next(r for r in sv.painel(b).execucoes if r.execucao.id == "ex-1").situacao == COMPROVADA

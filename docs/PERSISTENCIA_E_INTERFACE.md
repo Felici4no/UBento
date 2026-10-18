@@ -72,3 +72,23 @@ Uma compra real, identificada por `(fonte, id externo)`, é **um único fato**. 
 ## 6. Ainda isolado
 
 Monitor/agendamento e adaptadores de dados reais; conversão entre moedas; cancelamento de meta pela tela; edição ou remoção de registros (por desenho: correções são novos registros/estornos).
+
+## 7. Confirmações antes do MCP (identidade, concorrência, reavaliação)
+
+### 7.1 Identidade de um registro externo
+- A **chave** é `(fonte_id, id_externo)` (`RegistroExterno.chave`). A **conta** (`conta_id`) é um atributo do registro e **não** faz parte da identidade; o mesmo id em **outra fonte** é outra operação.
+- **Reimportação da mesma operação:** conteúdo idêntico (mesma chave, mesma versão) é a mesma operação. O banco não grava de novo (`entradas` deduplica por hash do conteúdo) e a conciliação também a deduplica (`importar_evidencia` devolve 0 novos).
+- **Correção pela fonte:** a mesma chave com `versao` maior. As versões antigas ficam guardadas; vale a mais alta e a execução é reconciliada contra ela.
+- **Mesma chave e mesma versão com conteúdo diferente** (inclusive só a conta): conflito. O registro fica em revisão e nada é comprovado por ele.
+- Testes: `tests/test_identidade_registro.py`.
+
+### 7.2 Alocações simultâneas
+- **Antes:** a verificação de exclusividade e a gravação eram passos separados (leitura, depois escrita em outra transação). Com duas conexões (dois processos, duas threads com conexões próprias) as duas passavam na verificação e as duas gravavam: a quantidade do registro podia ser ultrapassada. Os testes de concorrência reproduziram a falha (vermelho) antes da correção.
+- **Agora:** `registrar_execucao`, `vincular_manualmente`, `revogar_vinculo`, `substituir_vinculo` e `importar_evidencia` rodam dentro de uma seção de escrita **exclusiva** (`BEGIN IMMEDIATE`): quem chega depois espera e enxerga o que o primeiro gravou. Entra na mesma transação o que vem depois: a reavaliação da meta e das metas afetadas (tudo grava, ou nada).
+- Testes (`tests/test_concorrencia_metas.py`): dois vínculos simultâneos do mesmo registro (um vence), duas alocações parciais que somadas passam da quantidade (uma vence), alocações que cabem (as duas passam). Desligar a exclusividade faz os três falharem.
+- Limites: o SQLite tem um único escritor por arquivo; o tempo de espera é de 10 s e, estourado, a operação falha com `database is locked` (não é traduzida). Cada thread deve ter a sua conexão.
+
+### 7.3 Reavaliação das metas afetadas
+- **Antes:** vincular, revogar ou substituir reavaliava só a meta de quem corrigiu. Outra meta que dependia daquela quantidade (disputa que se resolve, ou registro que volta a ser órfão) continuava com o resultado antigo até alguém reavaliá-la.
+- **Agora:** depois de vincular, revogar, substituir ou registrar execução com referência declarada, o serviço reavalia **toda outra meta que já tenha avaliação** e que reivindique o registro ou o tenha importado, no instante de referência (nunca o relógio do sistema). Metas nunca avaliadas não são avaliadas por tabela. `importar_evidencia` não reavalia nada (a evidência só vale quando alguém vincula, registra ou reavalia).
+- Testes (`tests/test_correcao_vinculo.py`): liberar e tomar um registro muda os órfãos da outra meta; revogar numa meta resolve a disputa da outra (que passa a comprovar).

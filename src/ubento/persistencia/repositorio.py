@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TypeVar
 
@@ -81,11 +82,21 @@ def _gatilhos() -> str:
 
 
 class Repositorio:
-    def __init__(self, caminho: str | Path = ":memory:"):
+    """`somente_leitura=True` abre o banco existente em modo `ro` com `query_only`: nenhuma escrita é possível (nem criar tabelas)."""
+
+    def __init__(self, caminho: str | Path = ":memory:", somente_leitura: bool = False):
         self.caminho = str(caminho)
+        self.somente_leitura = somente_leitura
+        if somente_leitura:
+            if self.caminho == ":memory:" or not Path(self.caminho).exists():
+                raise ErroDePersistencia(f"banco inexistente (somente leitura não cria nada): {self.caminho}")
+            self.con = sqlite3.connect(Path(self.caminho).resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+            self.con.row_factory = sqlite3.Row
+            self.con.execute("PRAGMA query_only = ON")
+            return
         if self.caminho != ":memory:":
             Path(self.caminho).parent.mkdir(parents=True, exist_ok=True)
-        self.con = sqlite3.connect(self.caminho)
+        self.con = sqlite3.connect(self.caminho, timeout=10)
         self.con.row_factory = sqlite3.Row
         self.con.execute("PRAGMA foreign_keys = ON")
         if self.caminho != ":memory:":
@@ -95,13 +106,33 @@ class Repositorio:
     def fechar(self) -> None:
         self.con.close()
 
+    @contextmanager
+    def _tx(self, imediata: bool = False):
+        """Transação com commit/rollback. Aninhada, ela se junta à transação já aberta (quem abriu é quem fecha)."""
+        if self.con.in_transaction:
+            yield
+            return
+        self.con.execute("BEGIN IMMEDIATE" if imediata else "BEGIN")
+        try:
+            yield
+        except BaseException:
+            self.con.rollback()
+            raise
+        else:
+            self.con.commit()
+
+    def escrita(self):
+        """Seção de escrita EXCLUSIVA: `BEGIN IMMEDIATE` toma o direito de escrever já no início, então "verificar e gravar" é atômico
+        mesmo com outro processo ou thread (conexão) escrevendo no mesmo banco: o segundo espera e enxerga o resultado do primeiro."""
+        return self._tx(imediata=True)
+
     # -- metas ------------------------------------------------------------------------------------------------------
 
     def importar(self, arquivo: ReproducaoMeta, ativacao: Ativacao, agente_id: str | None = None) -> bool:
         """Registra o contrato, a ativação e as entradas. Idempotente: importar de novo não muda nada. Devolve se criou."""
         meta = arquivo.meta
         h = hash_contrato(meta)
-        with self.con:
+        with self._tx():
             atual = self.con.execute("SELECT contrato_hash FROM metas WHERE meta_id = ?", (meta.id,)).fetchone()
             if atual and atual["contrato_hash"] != h:
                 raise ErroDeContrato(f"a meta {meta.id} já está ativa com outro contrato: metas ativas são imutáveis")
@@ -141,7 +172,7 @@ class Repositorio:
             if tipo not in TIPOS_REGISTRAVEIS:
                 raise ErroDePersistencia(f"tipo de entrada desconhecido: {tipo}")
         gravou = []
-        with self.con:
+        with self._tx():
             for tipo, item in itens:
                 conteudo = hash_canonico(item, "ubento.entrada.v1")
                 if self.con.execute("SELECT 1 FROM entradas WHERE meta_id = ? AND tipo = ? AND hash LIKE ?", (meta_id, tipo, f"%:{conteudo}")).fetchone():
@@ -206,7 +237,7 @@ class Repositorio:
         if resultado.avaliacao.meta_id != meta_id:
             raise ErroDePersistencia("a avaliação pertence a outra meta")
         novos = 0
-        with self.con:  # rollback automático em qualquer exceção
+        with self._tx():  # rollback automático em qualquer exceção
             ultima = self.con.execute("SELECT COALESCE(MAX(sequencia), 0) FROM eventos WHERE meta_id = ?", (meta_id,)).fetchone()[0]
             for esperada, e in enumerate(resultado.eventos, start=ultima + 1):
                 if e.meta_id != meta_id or e.sequencia != esperada:
@@ -232,5 +263,5 @@ class Repositorio:
         return self.con.execute("SELECT proximo FROM cursor WHERE meta_id = ?", (meta_id,)).fetchone()["proximo"]
 
     def mover_cursor(self, meta_id: str, proximo: int) -> None:
-        with self.con:
+        with self._tx():
             self.con.execute("UPDATE cursor SET proximo = ? WHERE meta_id = ?", (proximo, meta_id))

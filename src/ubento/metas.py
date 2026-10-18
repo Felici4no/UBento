@@ -6,6 +6,7 @@ Nada aqui decide regra de negócio: isso é do núcleo. Aqui só se orquestra, p
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -83,6 +84,19 @@ class PainelMeta:
         return self.proximo_momento < self.momentos_total
 
 
+def _exclusivo(metodo):
+    """Executa o método inteiro (verificar, gravar e reavaliar) numa seção de escrita EXCLUSIVA do banco: com dois processos ou threads,
+    o segundo espera e enxerga o que o primeiro gravou, então duas alocações simultâneas nunca passam da quantidade do registro e
+    a correção + as reavaliações das metas afetadas ficam ou todas gravadas, ou nenhuma."""
+
+    @functools.wraps(metodo)
+    def interno(self, *args, **kwargs):
+        with self.repo.escrita():
+            return metodo(self, *args, **kwargs)
+
+    return interno
+
+
 @dataclass(frozen=True)
 class _Reivindicacao:
     meta_id: str
@@ -102,6 +116,7 @@ class ServicoMetas:
         self.repo.importar(arquivo, ativacao_de(arquivo), agente_id)
         return arquivo.meta.id
 
+    @_exclusivo
     def registrar_execucao(self, meta_id: str, execucao: Execucao) -> bool:
         """Registro SEPARADO de uma operação confirmada. É só aqui (e nunca na aprovação) que uma execução passa a existir.
 
@@ -126,6 +141,8 @@ class ServicoMetas:
         for r in execucao.referencias_externas:
             self._checar_exclusividade((r.fonte_id, r.id_externo), meta_id, execucao.id, r.quantidade_bruta_alocada)
         self.repo.registrar_entrada(meta_id, "execucoes", execucao)
+        if execucao.referencias_externas:
+            self._reavaliar_afetadas(meta_id, {(r.fonte_id, r.id_externo) for r in execucao.referencias_externas}, execucao.confirmada_em)
         return True
 
     # -- exclusividade do registro externo (vale entre TODAS as metas do banco; ver docs/PERSISTENCIA_E_INTERFACE.md) ----------------
@@ -180,6 +197,7 @@ class ServicoMetas:
                 ultimos[r.chave] = r
         return list(ultimos.values())
 
+    @_exclusivo
     def vincular_manualmente(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str, autor: str, justificativa: str) -> bool:
         """Liga, DEPOIS, uma execução registrada a um registro externo já importado (decisão humana, com autor e justificativa).
 
@@ -205,9 +223,23 @@ class ServicoMetas:
         vinculo = VinculoManual(execucao_id=execucao_id, fonte_id=fonte_id, id_externo=id_externo, autor=autor.strip(), justificativa=justificativa.strip(), em=em)
         self.repo.registrar_entrada(meta_id, "vinculos_manuais", vinculo)
         self.reavaliar(meta_id, em)
+        self._reavaliar_afetadas(meta_id, {(fonte_id, id_externo)}, em)
         return True
 
     # -- correção auditável de vínculos manuais ---------------------------------------------------------------------------------------
+
+    def _reavaliar_afetadas(self, meta_id: str, chaves: set[tuple[str, str]], em: datetime) -> None:
+        """Liberar ou disputar um registro externo muda o resultado de TODA meta que o enxerga: as que o reivindicam (disputa que se resolve)
+        e as que o têm importado (o registro volta a ser, ou deixa de ser, órfão para elas). Reavalia cada uma que já tinha avaliação."""
+        reivindicacoes = self._reivindicacoes()
+        for outra in self.repo.metas_ids():
+            if outra == meta_id or self.repo.ultima_avaliacao(outra) is None:
+                continue
+            enxerga = any(c.meta_id == outra for k in chaves for c in reivindicacoes.get(k, [])) or any(
+                r.chave in chaves for r in self.repo.entradas(outra, "registros_externos", RegistroExterno)
+            )
+            if enxerga:
+                self.reavaliar(outra, em)
 
     def _vinculo_vigente(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str) -> VinculoManual | None:
         return next((v for v in sorted(self._vinculos_ativos(meta_id), key=lambda v: v.em, reverse=True)
@@ -225,6 +257,7 @@ class ServicoMetas:
         ultima = self.repo.ultima_avaliacao(meta_id)
         return max(ultima[0].avaliada_em if ultima else original.em, original.em + timedelta(seconds=1))
 
+    @_exclusivo
     def revogar_vinculo(self, meta_id: str, execucao_id: str, fonte_id: str, id_externo: str, autor: str, justificativa: str) -> bool:
         """Retira um vínculo manual vigente (porque estava incorreto). O vínculo original é PRESERVADO; a revogação entra no histórico
         com autor, justificativa e instante. Não cria execução nem estorno: só desfaz a correspondência. A conciliação e o estado são
@@ -240,8 +273,10 @@ class ServicoMetas:
         revogacao = RevogacaoVinculo(vinculo_id=id_do_vinculo(alvo), autor=autor.strip(), justificativa=justificativa.strip(), em=em)
         self.repo.registrar_entrada(meta_id, "revogacoes_vinculos", revogacao)
         self.reavaliar(meta_id, em)
+        self._reavaliar_afetadas(meta_id, {(fonte_id, id_externo)}, em)
         return True
 
+    @_exclusivo
     def substituir_vinculo(self, meta_id: str, execucao_id: str, fonte_antigo: str, id_antigo: str, fonte_novo: str, id_novo: str,
                            autor: str, justificativa: str) -> bool:
         """Troca o vínculo vigente por outro registro externo: revogação + novo vínculo, gravados juntos (uma transação) e ligados entre si
@@ -264,8 +299,10 @@ class ServicoMetas:
                                      substituido_por_id=id_do_vinculo(novo))
         self.repo.registrar_entradas(meta_id, [("revogacoes_vinculos", revogacao), ("vinculos_manuais", novo)])
         self.reavaliar(meta_id, em)
+        self._reavaliar_afetadas(meta_id, {(fonte_antigo, id_antigo), (fonte_novo, id_novo)}, em)
         return True
 
+    @_exclusivo
     def importar_evidencia(self, meta_id: str, evidencia: EvidenciaExterna) -> int:
         """Acrescenta registros externos (e coberturas). A prova só passa a valer quando a conciliação os casar com execuções."""
         self.repo.carregar_meta(meta_id)

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QStandardPaths
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from ubento.caminhos import caminho_do_banco
 from ubento.metas import ServicoMetas
 from ubento.persistencia import Repositorio
 from ubento.workspace import Workspace
@@ -21,14 +21,6 @@ def asset(name: str) -> Path:
     """Localiza arquivos em assets/ tanto no código-fonte quanto no app empacotado."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
     return base / "assets" / name
-
-
-def caminho_do_banco() -> Path:
-    """Banco das metas: `UBENTO_DB` se definido, senão a pasta de dados do usuário (ex.: %LOCALAPPDATA%/UBento)."""
-    if os.environ.get("UBENTO_DB"):
-        return Path(os.environ["UBENTO_DB"])
-    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation) or str(Path.home() / ".ubento")
-    return Path(base) / "ubento.db"
 
 
 def main() -> int:

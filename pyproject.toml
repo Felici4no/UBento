@@ -21,6 +21,9 @@ dev = ["pytest>=8", "hypothesis>=6.100", "pyinstaller>=6"]
 [project.gui-scripts]
 ubento = "ubento.__main__:main"
 
+[project.scripts]
+ubento-mcp = "ubento.mcp_local:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
