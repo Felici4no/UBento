@@ -8,6 +8,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from ubento.caminhos import caminho_do_banco
+from ubento.conexoes import ServicoConexoes, cofre_padrao
 from ubento.metas import ServicoMetas
 from ubento.persistencia import Repositorio
 from ubento.workspace import Workspace
@@ -37,7 +38,10 @@ def main() -> int:
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))
 
-    window = MainWindow(Workspace(QSettings(APP_NAME, APP_NAME)), metas=ServicoMetas(Repositorio(caminho_do_banco())))
+    banco = caminho_do_banco()
+    metas = ServicoMetas(Repositorio(banco))
+    conexoes = ServicoConexoes(metas.repo, cofre_padrao(banco.parent))  # segredos no cofre do sistema, ao lado do banco
+    window = MainWindow(Workspace(QSettings(APP_NAME, APP_NAME)), metas=metas, conexoes=conexoes)
     window.show()
     return app.exec()
 

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from ..conexoes import CofreMemoria, ServicoConexoes
 from ..metas import ServicoMetas
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
@@ -55,7 +56,7 @@ def _swatch(color: str) -> QIcon:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, workspace: Workspace, animations: bool = True, metas: ServicoMetas | None = None):
+    def __init__(self, workspace: Workspace, animations: bool = True, metas: ServicoMetas | None = None, conexoes: ServicoConexoes | None = None):
         super().__init__()
         self.setWindowTitle("UBento")
         self.setMinimumSize(760, 520)
@@ -64,6 +65,8 @@ class MainWindow(QMainWindow):
 
         self.workspace = workspace
         self.metas = metas or ServicoMetas()  # sem banco informado: em memória (testes, capturas)
+        # sem serviço informado: conexões só em memória e com cofre temporário (testes e capturas nunca tocam o cofre real)
+        self.conexoes = conexoes or ServicoConexoes(self.metas.repo, CofreMemoria())
         self.animations = animations
         self.pages: dict[str, QScrollArea] = {}
         self.current = OVERVIEW
@@ -120,7 +123,7 @@ class MainWindow(QMainWindow):
         return self.pages[key]
 
     def _settings_page(self) -> None:
-        page = SettingsPage(self.workspace)
+        page = SettingsPage(self.workspace, self.conexoes)
         page.notify.connect(self.toast.show_message)
         page.add_agent_requested.connect(self.add_agent)
         self.pages[SETTINGS] = self._scroll(page)

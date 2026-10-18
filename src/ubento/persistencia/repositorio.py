@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS entradas (
     dados TEXT NOT NULL, UNIQUE (meta_id, tipo, hash)
 );
 CREATE TABLE IF NOT EXISTS cursor (meta_id TEXT PRIMARY KEY REFERENCES metas(meta_id), proximo INTEGER NOT NULL);
+-- Conexões com corretoras: configuração do usuário (mutável, ao contrário da história das metas). NUNCA guarda chave nem segredo:
+-- só um trecho mascarado e uma impressão (hash) para evitar a mesma chave conectada duas vezes. Os segredos ficam no cofre do sistema.
+CREATE TABLE IF NOT EXISTS conexoes (
+    id TEXT PRIMARY KEY, provedor TEXT NOT NULL, apelido TEXT NOT NULL, chave_mascarada TEXT NOT NULL, impressao TEXT NOT NULL UNIQUE,
+    criada_em TEXT NOT NULL, status TEXT NOT NULL, status_em TEXT NOT NULL, permissoes TEXT NOT NULL, mensagem TEXT NOT NULL
+);
 """
 
 # Campos de ReproducaoMeta que viram "entradas" (os dados que alimentam a conciliação). `momentos` entra à parte, em ordem.
@@ -285,6 +291,26 @@ class Repositorio:
             )
             novos += cur.rowcount
         return novos
+
+    # -- conexões (configuração; sem segredos) ------------------------------------------------------------------------------
+
+    def conexoes(self) -> list[sqlite3.Row]:
+        return list(self.con.execute("SELECT * FROM conexoes ORDER BY criada_em, id"))
+
+    def salvar_conexao(self, c: dict) -> None:
+        with self._tx():
+            self.con.execute(
+                "INSERT INTO conexoes (id, provedor, apelido, chave_mascarada, impressao, criada_em, status, status_em, permissoes, mensagem) "
+                "VALUES (:id, :provedor, :apelido, :chave_mascarada, :impressao, :criada_em, :status, :status_em, :permissoes, :mensagem)", c,
+            )
+
+    def atualizar_status_conexao(self, ident: str, status: str, status_em: str, mensagem: str, permissoes: str) -> None:
+        with self._tx():
+            self.con.execute("UPDATE conexoes SET status = ?, status_em = ?, mensagem = ?, permissoes = ? WHERE id = ?", (status, status_em, mensagem, permissoes, ident))
+
+    def remover_conexao(self, ident: str) -> None:
+        with self._tx():
+            self.con.execute("DELETE FROM conexoes WHERE id = ?", (ident,))
 
     # -- cursor da reprodução ------------------------------------------------------------------------------------------
 

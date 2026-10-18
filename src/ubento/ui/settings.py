@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from ..conexoes import ServicoConexoes
 from ..store import RANGES
 from ..workspace import Workspace
 from . import theme
@@ -62,7 +63,7 @@ class SettingsPage(QWidget):
     notify = Signal(str, bool)
     add_agent_requested = Signal()
 
-    def __init__(self, workspace: Workspace, parent=None):
+    def __init__(self, workspace: Workspace, conexoes: ServicoConexoes | None = None, parent=None):
         super().__init__(parent)
         self.ws = workspace
         self.setMinimumWidth(640)
@@ -116,6 +117,7 @@ class SettingsPage(QWidget):
                 SettingRow("Ocultar valores", "Mascara saldos e valores em todas as telas. Também fica no ícone de olho do topo.", self.hide_values),
                 SettingRow("Período padrão do gráfico", "Usado ao abrir o app e ao trocar de aba.", range_box),
             ]),
+            *([self._conexoes_section(conexoes)] if conexoes is not None else []),
             SettingSection("AGENTES", [
                 SettingRow("Novo agente", "Cada agente é uma carteira com seus próprios saldos. Clique com o botão direito numa aba "
                      "para renomear, mudar a cor, duplicar, mover ou remover.", new_agent),
@@ -148,6 +150,13 @@ class SettingsPage(QWidget):
 
         workspace.prefs_changed.connect(self.sync)
         self.sync()
+
+    def _conexoes_section(self, servico: ServicoConexoes):
+        from .conexoes import ConexoesSection  # import tardio: só quem usa conexões paga por elas
+
+        self.conexoes_section = ConexoesSection(servico)
+        self.conexoes_section.notify.connect(self.notify)
+        return self.conexoes_section
 
     def sync(self) -> None:
         """Reflete as preferências nos controles (ex.: o olho do header mudou o valor)."""
