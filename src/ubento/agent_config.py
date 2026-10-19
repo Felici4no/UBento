@@ -24,6 +24,11 @@ FREQUENCIES = {"hourly": "A cada hora", "daily": "Diária", "weekly": "Semanal"}
 RISK_LABELS = {1: "Muito baixo", 2: "Baixo", 3: "Moderado", 4: "Alto", 5: "Muito alto"}
 TRADABLE = ["ETH", "SOL", "AVAX", "BNB"]
 
+# Regras padrão de gestão de risco (caixas de seleção). Todas partem do risco por operação: sem ele, as outras três não têm base de cálculo.
+RISK_PCT_CHOICES = (0.5, 0.75, 1.0)  # % da conta arriscada em cada operação
+DAILY_STOP_CHOICES = (2, 3)  # perder N vezes o risco de uma operação no dia → para de comprar
+DAILY_GOAL_CHOICES = (2, 3, 4)  # ganhar N vezes o risco de uma operação no dia → para de comprar, para não devolver o lucro
+
 # chave -> (mínimo, máximo, passo, sufixo, título, descrição)
 PARAMS: dict[str, tuple[int, int, int, str, str, str]] = {
     "risk": (1, 5, 1, "", "Nível de risco", "Quanto maior, mais cedo o agente compra e maior o tamanho de cada operação."),
@@ -58,6 +63,13 @@ class AgentConfig:
     stop_loss_pct: int = 8
     take_profit_pct: int = 15
     rebalance_threshold_pct: int = 5
+    rule_risk: bool = False  # risco por operação: nenhuma compra arrisca mais que rule_risk_pct da conta
+    rule_risk_pct: float = 1.0
+    rule_daily_stop: bool = False  # stop diário
+    rule_daily_stop_x: int = 2
+    rule_daily_goal: bool = False  # meta diária limitada
+    rule_daily_goal_x: int = 3
+    rule_sizing: bool = False  # tamanho da posição pela fórmula risco ÷ distância do stop
     last_run: str | None = None  # ISO 8601
 
     # -- (de)serialização ----------------------------------------------------
@@ -88,10 +100,28 @@ class AgentConfig:
                 setattr(self, key, getattr(AgentConfig(), key))
         self.assets = [a for a in TRADABLE if a in (self.assets or [])] or list(TRADABLE)
         self.active = bool(self.active)
+        self.rule_risk_pct = _choice(self.rule_risk_pct, RISK_PCT_CHOICES, 1.0)
+        self.rule_daily_stop_x = _choice(self.rule_daily_stop_x, DAILY_STOP_CHOICES, 2)
+        self.rule_daily_goal_x = _choice(self.rule_daily_goal_x, DAILY_GOAL_CHOICES, 3)
+        self.rule_risk = bool(self.rule_risk)
+        # as demais regras dependem do risco por operação
+        self.rule_daily_stop = bool(self.rule_daily_stop) and self.rule_risk
+        self.rule_daily_goal = bool(self.rule_daily_goal) and self.rule_risk
+        self.rule_sizing = bool(self.rule_sizing) and self.rule_risk
         return self
 
     def relevant(self, key: str) -> bool:
+        if key == "stop_loss_pct" and self.rule_risk and self.strategy != "manual":
+            return True  # a distância do stop é a base do cálculo do risco, em qualquer algoritmo
         return key in RELEVANT[self.strategy]
+
+
+def _choice(value, allowed: tuple, default):
+    try:
+        value = type(default)(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value in allowed else default
 
 
 def describe(cfg: AgentConfig) -> str:
@@ -112,10 +142,23 @@ def describe(cfg: AgentConfig) -> str:
         parts.append(f"stop-loss de {cfg.stop_loss_pct}% e take-profit de {cfg.take_profit_pct}%")
     if cfg.relevant("rebalance_threshold_pct"):
         parts.append(f"rebalanceia com desvio acima de {cfg.rebalance_threshold_pct}%")
+    if cfg.rule_risk:
+        regras = [f"risco de {num(cfg.rule_risk_pct)}% da conta por operação"]
+        if cfg.rule_daily_stop:
+            regras.append(f"para de comprar ao perder {cfg.rule_daily_stop_x}× o risco no dia")
+        if cfg.rule_daily_goal:
+            regras.append(f"para de comprar ao ganhar {cfg.rule_daily_goal_x}× o risco no dia")
+        if cfg.rule_sizing:
+            regras.append("calcula o tamanho pela fórmula risco ÷ stop")
+        parts.append("regras de risco: " + ", ".join(regras))
     mode = {"auto": "executa sozinho", "approve": "pede a sua aprovação antes de executar", "suggest": "apenas sugere, sem executar"}[cfg.mode]
     when = FREQUENCIES[cfg.frequency].lower()
     status = "" if cfg.active else " (agente pausado)"
     return f"{'; '.join(parts)}. Ele {mode} e roda {when}.{status}"
+
+
+def num(x: float) -> str:
+    return f"{x:g}".replace(".", ",")
 
 
 def next_run(cfg: AgentConfig, now: datetime) -> datetime:

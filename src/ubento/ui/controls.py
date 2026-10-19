@@ -129,6 +129,31 @@ class OptionCard(QAbstractButton):
                    Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap, self._desc)
 
 
+class CheckBox(QAbstractButton):
+    """Caixa de seleção (quadrado com marca de verificação), para regras que se liga uma a uma."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(26, 26)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        setup(p)
+        p.setOpacity(1.0 if self.isEnabled() else 0.35)
+        on = self.isChecked()
+        rect = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        p.setBrush(QColor(theme.BLUE) if on else QColor(255, 255, 255, 14 if self.underMouse() and self.isEnabled() else 0))
+        p.setPen(QPen(QColor(theme.BLUE) if on else QColor(theme.OUTLINE), 1.6))
+        p.drawRoundedRect(rect, 7, 7)
+        if on:
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor("#FFFFFF"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            c = rect.center()
+            p.drawPolyline([QPointF(c.x() - 4.6, c.y() + 0.2), QPointF(c.x() - 1.2, c.y() + 3.6), QPointF(c.x() + 5.0, c.y() - 3.6)])
+
+
 class ToggleChip(QAbstractButton):
     """Chip liga/desliga com a medalha do ativo (ativos permitidos)."""
 

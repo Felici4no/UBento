@@ -426,6 +426,11 @@ class Store(QObject):
         self.changed.emit()
         return None
 
+    def resultado_do_dia(self, dia: date) -> float:
+        """Soma do resultado (líquido de taxa) das decisões EXECUTADAS no dia. Propostas e decisões sem dinheiro não contam;
+        posições em aberto só entram pelo que já se pagou de taxa (o resultado de uma compra no ato é −taxa)."""
+        return sum(d.pnl_usd for d in self.decisions if d.status == "executed" and d.pnl_usd is not None and d.moment.date() == dia)
+
     def decisions_count(self) -> int:
         return sum(self.activity.values())
 

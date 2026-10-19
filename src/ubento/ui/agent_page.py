@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QGridLayout, QHBoxLayout, QLineEdit, QMessageBox, QVBoxLayout, QWidget,
 )
 
 from ..agent_config import (
-    FREQUENCIES, MODES, PARAMS, RISK_LABELS, STRATEGIES, STRATEGY_ICONS, TRADABLE, describe, next_run,
+    DAILY_GOAL_CHOICES, DAILY_STOP_CHOICES, FREQUENCIES, MODES, PARAMS, RISK_LABELS, RISK_PCT_CHOICES, STRATEGIES, STRATEGY_ICONS, TRADABLE, describe,
+    next_run, num,
 )
 from ..workspace import COLORS, Workspace
 from . import theme
 from .components import ActionButton, Card, Label, PillButton, Switch
-from .controls import ColorSwatches, OptionCard, ToggleChip, ValueSlider
+from .controls import CheckBox, ColorSwatches, OptionCard, ToggleChip, ValueSlider
 from .settings import SettingRow, SettingSection
 
 W = theme.W
@@ -83,6 +84,33 @@ class AgentConfigPage(QWidget):
             self.sliders[key] = slider
             self.param_rows[key] = SettingRow(title, desc, slider)
 
+        # -- regras padrão de risco (caixas de seleção)
+        self.rule_boxes: dict[str, CheckBox] = {}
+        self.rule_pills: dict[str, dict] = {}
+        self.rule_rows: dict[str, SettingRow] = {}
+        self._rule_fields: dict[str, tuple[str, str | None]] = {}  # chave da regra -> (campo da caixa, campo do valor)
+        pacote = ActionButton("Aplicar pacote padrão", height=36, pad=16)
+        pacote.clicked.connect(self._pacote_padrao)
+        self.rules_pack = pacote
+        regras = (
+            ("risk", "rule_risk", "Risco por operação", "Nenhuma compra arrisca mais que esta fatia da conta: valor ≤ risco ÷ stop-loss.",
+             {v: num(v) + "%" for v in RISK_PCT_CHOICES}, "rule_risk_pct"),
+            ("stop", "rule_daily_stop", "Stop diário", "Para de comprar no dia ao perder este múltiplo do risco de uma operação. Vendas continuam permitidas.",
+             {v: f"{v}×" for v in DAILY_STOP_CHOICES}, "rule_daily_stop_x"),
+            ("goal", "rule_daily_goal", "Meta de ganho diária", "Para de comprar no dia ao ganhar este múltiplo do risco, para não devolver o lucro.",
+             {v: f"{v}×" for v in DAILY_GOAL_CHOICES}, "rule_daily_goal_x"),
+            ("sizing", "rule_sizing", "Tamanho pela fórmula", "Cada compra tem o tamanho = risco em US$ ÷ stop-loss (ex.: conta de US$ 10.000, risco de 1% e stop de 8% → US$ 1.250).",
+             None, None),
+        )
+        for chave, campo, titulo, descricao, opcoes, campo_valor in regras:
+            box = CheckBox()
+            box.toggled.connect(lambda on, c=campo: self._set(**{c: on}))
+            pills = self._pills(opcoes, lambda v, c=campo_valor: self._set(**{c: v})) if opcoes else None
+            row = SettingRow(titulo, descricao, pills["box"] if pills else None)
+            row.layout().insertWidget(0, box, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.rule_boxes[chave], self.rule_pills[chave], self.rule_rows[chave] = box, pills, row
+            self._rule_fields[chave] = (campo, campo_valor)
+
         # -- ativos
         self.chips: dict[str, ToggleChip] = {}
         chips = QHBoxLayout()
@@ -121,6 +149,10 @@ class AgentConfigPage(QWidget):
             ]),
             "algorithm": SettingSection("ALGORITMO", [SettingRow("Como o agente decide", "Cada algoritmo usa parâmetros diferentes; só os relevantes aparecem abaixo.", None), ]),
             "limits": SettingSection("RISCO E LIMITES", list(self.param_rows.values())),
+            "rules": SettingSection("REGRAS DE RISCO", [
+                SettingRow("Pacote padrão", "Marca as quatro regras com valores moderados (risco de 0,75%, stop de 2×, meta de 3×). Dá para ajustar cada uma depois.", pacote),
+                *self.rule_rows.values(),
+            ]),
             "assets": SettingSection("ATIVOS", [SettingRow("Ativos permitidos", "O agente só compra e vende estes. Pelo menos um.", chip_box)]),
             "execution": SettingSection("EXECUÇÃO", [mode_row, freq_row]),
         }
@@ -154,7 +186,7 @@ class AgentConfigPage(QWidget):
         column.addWidget(self.subtitle)
         column.addSpacing(6)
         column.addWidget(summary_card)
-        for key in ("identity", "algorithm", "limits", "assets", "execution"):
+        for key in ("identity", "algorithm", "limits", "rules", "assets", "execution"):
             column.addWidget(self.sections[key])
         column.addStretch(1)
 
@@ -234,6 +266,8 @@ class AgentConfigPage(QWidget):
                 slider.set_value(getattr(cfg, key))
                 self.param_rows[key].setVisible(cfg.relevant(key))
             self.sections["limits"].setVisible(cfg.strategy != "manual")
+            self.sections["rules"].setVisible(cfg.strategy != "manual")
+            self._sync_rules(cfg)
             self.sections["assets"].setVisible(cfg.strategy != "manual")
             self.sections["execution"].setVisible(cfg.strategy != "manual")
             for sym, chip in self.chips.items():
@@ -249,6 +283,23 @@ class AgentConfigPage(QWidget):
             self.run.update()
         finally:
             self._syncing = False
+
+    def _sync_rules(self, cfg) -> None:
+        for chave, (campo, campo_valor) in self._rule_fields.items():
+            ligada = bool(getattr(cfg, campo))
+            box = self.rule_boxes[chave]
+            box.setChecked(ligada)
+            box.setEnabled(chave == "risk" or cfg.rule_risk)  # as outras regras partem do risco por operação
+            self.rule_rows[chave].setEnabled(chave == "risk" or cfg.rule_risk)
+            if self.rule_pills[chave]:
+                for valor, botao in self.rule_pills[chave]["buttons"].items():
+                    botao.setChecked(valor == getattr(cfg, campo_valor))
+                    botao.setEnabled(ligada)
+            box.update()
+
+    def _pacote_padrao(self) -> None:
+        self._set(rule_risk=True, rule_risk_pct=0.75, rule_daily_stop=True, rule_daily_stop_x=2, rule_daily_goal=True, rule_daily_goal_x=3, rule_sizing=True)
+        self.notify.emit("Pacote padrão de risco aplicado", True)
 
     def _update_schedule(self, cfg) -> None:
         now = datetime.now()

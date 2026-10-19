@@ -12,7 +12,7 @@ from __future__ import annotations
 import random
 from datetime import date, datetime
 
-from .agent_config import AgentConfig
+from .agent_config import AgentConfig, num
 from .formatting import number, pct
 from .store import ASSETS, CRYPTO_ORDER, MERCADO, TRADE_FEE_RATE, Decision, Store, Trade
 
@@ -140,8 +140,69 @@ def _conservative(cfg: AgentConfig, store: Store, now: datetime) -> list[Decisio
 STRATEGY_FUNCS = {"momentum": _momentum, "rebalance": _rebalance, "dca": _dca, "conservative": _conservative}
 
 
+# -- regras de risco -----------------------------------------------------------------------------------------------------------------
+
+
+def _usd(valor: float) -> str:
+    return f"US$ {number(abs(valor), 2)}"
+
+
+def _bloqueio_do_dia(cfg: AgentConfig, store: Store, now: datetime) -> str | None:
+    """Motivo de não abrir novas compras hoje (stop diário ou meta diária atingidos), ou None."""
+    risco = store.total_usd() * cfg.rule_risk_pct / 100
+    hoje = store.resultado_do_dia(now.date())
+    if cfg.rule_daily_stop and hoje <= -cfg.rule_daily_stop_x * risco + 1e-9:
+        return (f"Stop diário atingido: resultado de hoje −{_usd(hoje)}, limite −{_usd(cfg.rule_daily_stop_x * risco)} "
+                f"({cfg.rule_daily_stop_x}× o risco de {num(cfg.rule_risk_pct)}% por operação). Sem novas compras hoje; vendas continuam permitidas")
+    if cfg.rule_daily_goal and hoje >= cfg.rule_daily_goal_x * risco - 1e-9:
+        return (f"Meta diária atingida: +{_usd(hoje)} de {_usd(cfg.rule_daily_goal_x * risco)} "
+                f"({cfg.rule_daily_goal_x}× o risco de {num(cfg.rule_risk_pct)}% por operação). Sem novas compras hoje, para não devolver o lucro")
+    return None
+
+
+def _aplicar_regras(cfg: AgentConfig, store: Store, decisoes: list[Decision], now: datetime) -> list[Decision]:
+    """Aplica as regras de risco marcadas às COMPRAS que o algoritmo propôs. Vendas passam sempre (reduzir risco nunca é bloqueado).
+
+    - Risco por operação: uma compra nunca arrisca mais que `rule_risk_pct` da conta, isto é, valor ≤ risco ÷ distância do stop.
+    - Tamanho pela fórmula: a compra passa a ter exatamente esse valor (limitado pelo caixa gastável e pela posição máxima por ativo).
+    - Stop/meta diários: sem novas compras depois de perder/ganhar N vezes o risco de uma operação no dia.
+    """
+    if not cfg.rule_risk:
+        return decisoes
+    bloqueio = _bloqueio_do_dia(cfg, store, now)
+    total, gastavel = _cash(cfg, store)
+    formula = total * cfg.rule_risk_pct / 100 / (cfg.stop_loss_pct / 100)
+    saida: list[Decision] = []
+    motivo = bloqueio
+    for d in decisoes:
+        t = d.trade
+        if t is None or t.side == "sell":
+            saida.append(d)
+            continue
+        if bloqueio:
+            continue
+        usd = formula if cfg.rule_sizing else min(t.usd, formula)
+        if usd > t.usd:  # a fórmula aumentou a compra: respeita a posição máxima e o caixa
+            usd = min(usd, max(0.0, total * cfg.max_position_pct / 100 - store.value_usd(t.symbol)))
+        usd = round(min(usd, gastavel), 2)
+        if usd < MIN_TRADE_USD:
+            motivo = motivo or f"o tamanho permitido pelo risco ficou abaixo do mínimo de {_usd(MIN_TRADE_USD)}"
+            continue
+        gastavel -= usd
+        if abs(usd - t.usd) < 0.005:
+            saida.append(d)
+            continue
+        nota = (f" · Tamanho ajustado pelo risco de {num(cfg.rule_risk_pct)}% da conta com stop de {cfg.stop_loss_pct}%: "
+                f"{_usd(usd)} em vez de {_usd(t.usd)}")
+        saida.append(_buy(t.symbol, usd, d.detail + nota, now, d.kind, d.title))
+    if not saida and decisoes:
+        return [_hold("Compras suspensas pelas regras de risco", bloqueio or f"Nenhuma compra coube nas regras: {motivo}", now)]
+    return saida
+
+
 def decide(cfg: AgentConfig, store: Store, now: datetime | None = None) -> list[Decision]:
     """Decisões que o algoritmo do agente tomaria agora (sem aplicá-las)."""
     if not cfg.active or cfg.strategy == "manual":
         return []
-    return STRATEGY_FUNCS[cfg.strategy](cfg, store, now or datetime.now())
+    now = now or datetime.now()
+    return _aplicar_regras(cfg, store, STRATEGY_FUNCS[cfg.strategy](cfg, store, now), now)
