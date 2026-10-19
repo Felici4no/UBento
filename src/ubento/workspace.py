@@ -15,7 +15,8 @@ from PySide6.QtCore import QObject, QSettings, Signal
 
 from . import engine, formatting
 from .agent_config import AgentConfig
-from .store import RANGES, Store
+from .conexoes.mercado import Cotacoes
+from .store import AGUARDANDO_PRECOS, MERCADO, RANGES, Store
 
 OVERVIEW = "overview"
 COLORS = ["#3B6BFF", "#B14CF0", "#2EE081", "#F2B01E", "#EF4B3F", "#2FC6E8", "#F26FB1"]
@@ -32,13 +33,14 @@ class Agent:
     config: AgentConfig = field(default_factory=AgentConfig)
 
 
-DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1M"}
+DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1M", "mercado": "simulado"}
 
 
 class Workspace(QObject):
     changed = Signal()  # estrutura ou aparência dos agentes mudou
     agent_changed = Signal(str)  # configuração de um agente mudou (id)
     prefs_changed = Signal()
+    mercado_changed = Signal()  # chegou uma leitura (ou uma falha) do mercado real
 
     def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
@@ -52,6 +54,10 @@ class Workspace(QObject):
             self._save()  # os ids são aleatórios: sem gravar já na 1ª execução, as metas ficariam órfãs depois de reiniciar
         self._refresh_overview()
         formatting.set_hidden(bool(self.prefs["hide_values"]))
+        self.overview.real = self.mercado_real
+        if self.mercado_real:
+            MERCADO.ligar()
+            self.overview.definir_modo(True)
 
     # -- preferências ------------------------------------------------------
 
@@ -63,12 +69,62 @@ class Workspace(QObject):
             return
         if key == "default_range" and value not in RANGES:
             return
+        if key == "mercado" and value not in ("simulado", "real"):
+            return
         self.prefs[key] = value
         if key == "hide_values":
             formatting.set_hidden(bool(value))
             self._repaint_all()
+        if key == "mercado":
+            self._trocar_mercado(value == "real")
         self._save()
         self.prefs_changed.emit()
+
+    # -- mercado real --------------------------------------------------------
+
+    @property
+    def mercado_real(self) -> bool:
+        return self.prefs["mercado"] == "real"
+
+    def _trocar_mercado(self, real: bool) -> None:
+        """Liga/desliga o mercado real. Cada carteira recomeça no modo novo (nova com caixa, ou a demonstração) e o Geral acompanha."""
+        MERCADO.ligar() if real else MERCADO.desativar()
+        for agent in self.agents:
+            agent.store.definir_modo(real)
+        self.overview.real = real
+        self.overview.definir_modo(real)
+        self.mercado_changed.emit()
+
+    def receber_cotacoes(self, cotacoes: Cotacoes, agora: datetime | None = None) -> None:
+        """Entra uma leitura nova da Binance: preços, sinais e um ponto no histórico de cada carteira. Ignora leituras atrasadas após desligar o modo."""
+        if not self.mercado_real:
+            return
+        agora = agora or datetime.now()
+        MERCADO.aplicar(cotacoes.precos, cotacoes.variacao_7d, agora)
+        for agent in self.agents:
+            agent.store.registrar_ponto(agora)
+            agent.store.changed.emit()  # o Geral se recalcula por aqui
+        self.overview.registrar_ponto(agora)
+        self.overview.changed.emit()
+        self.mercado_changed.emit()
+
+    def receber_falha(self, mensagem: str) -> None:
+        """A leitura falhou: o último preço continua valendo (até vencer) e a tela passa a mostrar o motivo."""
+        if self.mercado_real:
+            MERCADO.erro = mensagem
+            self.mercado_changed.emit()
+
+    def status_mercado(self, agora: datetime | None = None) -> str:
+        if not self.mercado_real:
+            return "Dados simulados de demonstração."
+        agora = agora or datetime.now()
+        if MERCADO.erro:
+            return f"Sem preços novos: {MERCADO.erro}"
+        if MERCADO.atualizado_em is None:
+            return "Buscando os preços na Binance…"
+        if not MERCADO.fresco(agora):
+            return f"Preços desatualizados (última leitura às {MERCADO.atualizado_em:%H:%M:%S})."
+        return f"Preços ao vivo da Binance · última leitura às {MERCADO.atualizado_em:%H:%M:%S}"
 
     def _repaint_all(self) -> None:
         """Força todos os cards a reler os valores (necessário ao mascarar/desmascarar)."""
@@ -126,6 +182,8 @@ class Workspace(QObject):
         if not cfg.active:
             return 0, "Agente pausado. Ative-o para rodar"
         now = now or datetime.now()
+        if agent.store.real and not MERCADO.fresco(now):
+            return 0, AGUARDANDO_PRECOS
         status = {"auto": "executed", "approve": "proposed", "suggest": "suggested"}[cfg.mode]
         made = 0
         for d in engine.decide(cfg, agent.store, now):
@@ -230,9 +288,9 @@ class Workspace(QObject):
         agent_id = f"a{random.Random().randrange(16**8):08x}"
         return Agent(agent_id, name, color, seed, scale, self._store(agent_id, seed, scale))
 
-    @staticmethod
-    def _store(agent_id: str, seed: str, scale: float) -> Store:
-        store = Store(seed=seed, scale=scale)
+    def _store(self, agent_id: str, seed: str, scale: float) -> Store:
+        real = self.mercado_real
+        store = Store(seed=seed, scale=scale, real=real)
         store.owner_id = agent_id
         return store
 

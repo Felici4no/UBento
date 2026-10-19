@@ -17,7 +17,9 @@ from PySide6.QtCore import QObject, Signal
 
 SERVICE_FEE_RATE = 0.023
 GAS_FEE_USD = 1.32
-TRADE_FEE_RATE = 0.001  # taxa de 0,10% sobre cada compra/venda dos agentes (demonstração)
+TRADE_FEE_RATE = 0.001  # taxa de 0,10% sobre cada compra/venda dos agentes (a mesma da Binance spot)
+CAPITAL_INICIAL_REAL = 10_000.0  # caixa (em USD) de cada carteira nova do modo mercado real; as ordens são simuladas, nunca enviadas à corretora
+PRECO_VALIDO_S = 120  # sem cotação mais nova que isso, o modo real não opera
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,43 @@ ASSETS: dict[str, Asset] = {
     )
 }
 CRYPTO_ORDER = ["SOL", "AVAX", "ETH", "BNB", "USDT"]
+PRECOS_DEMO = {s: a.price for s, a in ASSETS.items()}
+
+
+class MercadoAoVivo:
+    """Estado global do modo mercado real: os preços de `ASSETS` passam a ser os da Binance e os sinais dos agentes, a variação real de 7 dias.
+
+    Ao desligar, os preços originais da demonstração voltam. Cotação velha (mais de `PRECO_VALIDO_S`) ou ausente bloqueia qualquer operação.
+    """
+
+    def __init__(self) -> None:
+        self.ativo = False
+        self.variacao_7d: dict[str, float] = {}
+        self.atualizado_em: datetime | None = None
+        self.erro: str | None = None
+
+    def ligar(self) -> None:
+        self.ativo = True
+
+    def desativar(self) -> None:
+        self.ativo = False
+        self.variacao_7d, self.atualizado_em, self.erro = {}, None, None
+        for simbolo, preco in PRECOS_DEMO.items():
+            ASSETS[simbolo] = replace(ASSETS[simbolo], price=preco)
+
+    def aplicar(self, precos: dict[str, float], variacao_7d: dict[str, float], agora: datetime) -> None:
+        for simbolo, preco in precos.items():
+            if simbolo in ASSETS:
+                ASSETS[simbolo] = replace(ASSETS[simbolo], price=preco)
+        self.variacao_7d = dict(variacao_7d)
+        self.atualizado_em, self.erro = agora, None
+
+    def fresco(self, agora: datetime) -> bool:
+        return self.ativo and self.atualizado_em is not None and timedelta(0) <= agora - self.atualizado_em <= timedelta(seconds=PRECO_VALIDO_S)
+
+
+MERCADO = MercadoAoVivo()
+AGUARDANDO_PRECOS = "Aguardando os preços ao vivo da Binance"
 
 # (nº de barras, dias por barra, variação alvo do período)
 RANGES: dict[str, tuple[int, int, float]] = {
@@ -142,15 +181,58 @@ def make_quote(send: str, receive: str, amount: float) -> Quote:
 class Store(QObject):
     changed = Signal()
 
-    def __init__(self, now: datetime | None = None, seed: str = "main", scale: float = 1.0) -> None:
+    def __init__(self, now: datetime | None = None, seed: str = "main", scale: float = 1.0, real: bool = False) -> None:
         super().__init__()
         self.now = now or datetime.now()
         self.seed = seed
         self.scale = scale
+        self.real = real  # modo mercado real: carteira nova, preços ao vivo, histórico observado
         self.readonly = False  # o agregado "Geral" é só leitura
         self._parts: list[Store] = []
         self.owner_id: str | None = None
-        self._load_demo()
+        self.pontos: list[tuple[datetime, float]] = []  # patrimônio observado ao longo do tempo (só no modo real)
+        self.usdc_observado: list[float] = []
+        self._load()
+
+    def _load(self) -> None:
+        self._load_real() if self.real else self._load_demo()
+
+    def _load_real(self) -> None:
+        """Carteira nova: só caixa, sem custo de aquisição, sem decisões, sem atividade e sem nenhum número simulado."""
+        self.holdings = {s: 0.0 for s in ASSETS}
+        self.holdings["USD"] = CAPITAL_INICIAL_REAL
+        self.cost_basis = {}
+        self.spent = self.income = 0.0
+        self.crypto_change = 0.0
+        hoje = self.now.date()
+        self.activity = {date(hoje.year, hoje.month, d): 0 for d in range(1, hoje.day + 1)}
+        self.decisions = []
+        self.pontos = [(self.now, self.total_usd())]
+        self.usdc_observado = []
+
+    def definir_modo(self, real: bool) -> None:
+        """Troca entre demonstração e mercado real, descartando o estado do modo anterior (as telas se atualizam via `changed`)."""
+        self.real = real
+        self._load()
+        if self._parts:
+            self._sync()
+            if real:
+                self.pontos = [(self.now, self.total_usd())]  # o histórico do Geral recomeça junto com as carteiras
+        else:
+            self.changed.emit()
+
+    def registrar_ponto(self, agora: datetime) -> None:
+        """Anota o patrimônio e o preço do USDC observados agora e recalcula a variação da carteira cripto. Não emite `changed`."""
+        total = self.total_usd()
+        if self.pontos and (agora - self.pontos[-1][0]).total_seconds() < 60:
+            self.pontos[-1] = (agora, total)  # no máximo um ponto por minuto
+        else:
+            self.pontos.append((agora, total))
+        del self.pontos[:-20_000]
+        self.usdc_observado = (self.usdc_observado + [ASSETS["USDC"].price])[-44:]
+        pesos = {s: self.value_usd(s) for s in CRYPTO_ORDER if self.value_usd(s) > 0}
+        soma = sum(pesos.values())
+        self.crypto_change = sum(v * MERCADO.variacao_7d.get(s, 0.0) for s, v in pesos.items()) / soma if soma else 0.0
 
     def _load_demo(self) -> None:
         scale = self.scale
@@ -168,15 +250,15 @@ class Store(QObject):
         self.decisions: list[Decision] = demo_decisions(self.seed, self.now)
 
     def reset(self) -> None:
-        """Volta aos dados de demonstração originais (as telas se atualizam via `changed`)."""
-        self._load_demo()
+        """Volta ao estado inicial do modo atual (as telas se atualizam via `changed`)."""
+        self._load()
         self.changed.emit()
 
     # -- agregação (aba "Geral") ---------------------------------------------
 
     @classmethod
-    def combined(cls, parts: list[Store], now: datetime | None = None) -> Store:
-        store = cls(now=now, seed="geral")
+    def combined(cls, parts: list[Store], now: datetime | None = None, real: bool = False) -> Store:
+        store = cls(now=now, seed="geral", real=real)
         store.readonly = True
         store.set_parts(parts)
         return store
@@ -219,8 +301,10 @@ class Store(QObject):
         return sum(v for _, v in self.crypto_breakdown())
 
     def history(self, range_key: str) -> list[tuple[date, float]]:
-        """Série sintética (determinística) que termina no saldo total atual."""
+        """Série sintética (determinística) que termina no saldo total atual. No modo real, a série OBSERVADA do patrimônio."""
         count, step, target = RANGES[range_key]
+        if self.real:
+            return self._historico_observado(count, step)
         drift = math.log(1 + target) / (count - 1)
         sigma = 1.1 * drift + 0.003
         rng = random.Random(f"ubento-{self.seed}-{range_key}")
@@ -232,7 +316,26 @@ class Store(QObject):
         today = self.now.date()
         return [(today - timedelta(days=step * (count - 1 - i)), v) for i, v in enumerate(values)]
 
+    def _historico_observado(self, count: int, step: int) -> list[tuple[date, float]]:
+        """`count` pontos, um a cada `step` dias, terminando hoje. Cada um é o último patrimônio OBSERVADO até aquele dia; antes de a carteira existir
+        a linha é o primeiro valor visto (o capital inicial), nunca um número inventado."""
+        hoje = self.pontos[-1][0].date()
+        ordenados = sorted(self.pontos, key=lambda ponto: ponto[0])
+        out: list[tuple[date, float]] = []
+        for i in range(count):
+            dia = hoje - timedelta(days=step * (count - 1 - i))
+            valor = ordenados[0][1]
+            for quando, v in ordenados:
+                if quando.date() > dia:
+                    break
+                valor = v
+            out.append((dia, valor))
+        return out
+
     def usdc_series(self) -> list[float]:
+        if self.real:
+            obs = self.usdc_observado or [ASSETS["USDC"].price]
+            return obs if len(obs) > 1 else obs * 2
         rng = random.Random(f"ubento-{self.seed}-usdc")
         n = 44
         raw = [rng.gauss(0, 0.0012) for _ in range(n)]
@@ -346,6 +449,8 @@ class Store(QObject):
         """Devolve o motivo de a troca não poder acontecer, ou None se está ok."""
         if self.readonly:
             return "Escolha um agente para fazer swap"
+        if self.real and not MERCADO.fresco(datetime.now()):
+            return AGUARDANDO_PRECOS
         if send == receive:
             return "Escolha moedas diferentes"
         if amount <= 0:

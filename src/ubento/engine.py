@@ -4,7 +4,7 @@ Funções puras: recebem a configuração e o estado do `Store` e devolvem as de
 que o algoritmo tomaria hoje. Não alteram nada; quem aplica é o Workspace, de acordo
 com o modo (automático, pedir aprovação, só sugerir).
 
-Os sinais de mercado são simulados: determinísticos por ativo e dia.
+Os sinais de mercado são simulados (determinísticos por ativo e dia), exceto no modo mercado real: ali o sinal é a variação real de 7 dias da Binance.
 """
 
 from __future__ import annotations
@@ -14,13 +14,15 @@ from datetime import date, datetime
 
 from .agent_config import AgentConfig
 from .formatting import number, pct
-from .store import ASSETS, CRYPTO_ORDER, TRADE_FEE_RATE, Decision, Store, Trade
+from .store import ASSETS, CRYPTO_ORDER, MERCADO, TRADE_FEE_RATE, Decision, Store, Trade
 
 MIN_TRADE_USD = 10.0
 
 
 def momentum(symbol: str, day: date) -> float:
-    """Variação simulada do ativo nos últimos 7 dias, em %."""
+    """Variação do ativo nos últimos 7 dias, em %: a real da Binance no modo mercado real; no demonstrativo, uma simulada e limitada."""
+    if MERCADO.ativo:
+        return MERCADO.variacao_7d.get(symbol, 0.0)
     rng = random.Random(f"ubento-mom-{symbol}-{day.isoformat()}")
     return max(-15.0, min(20.0, rng.gauss(2.5, 8.0)))
 

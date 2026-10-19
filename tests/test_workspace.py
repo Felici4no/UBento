@@ -42,7 +42,7 @@ def test_prefs_persist_and_hide_values_masks_formatting(tmp_path):
         assert formatting.money(1234.5) == "$••••"
 
         again = Workspace(QSettings(path, QSettings.Format.IniFormat))
-        assert again.prefs == {"user_name": "Lucas", "hide_values": True, "default_range": "6M"}
+        assert again.prefs == {"user_name": "Lucas", "hide_values": True, "default_range": "6M", "mercado": "simulado"}
         assert formatting.is_hidden()
     finally:
         formatting.set_hidden(False)

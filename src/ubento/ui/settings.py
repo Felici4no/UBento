@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..conexoes import ServicoConexoes
-from ..store import RANGES
+from ..store import CAPITAL_INICIAL_REAL, RANGES
 from ..workspace import Workspace
 from . import theme
 from .components import ActionButton, Card, Label, LinkButton, PillButton, Switch
@@ -29,7 +29,7 @@ class SettingRow(QWidget):
         text = QVBoxLayout()
         text.setSpacing(2)
         text.addWidget(Label(title, 16, W.Medium))
-        desc = Label(description, 13, W.Normal, theme.MUTED)
+        desc = self.desc = Label(description, 13, W.Normal, theme.MUTED)
         desc.setWordWrap(True)
         text.addWidget(desc)
         h = QHBoxLayout(self)
@@ -84,6 +84,11 @@ class SettingsPage(QWidget):
         self.hide_values.setChecked(workspace.pref("hide_values"))
         self.hide_values.toggled.connect(lambda on: workspace.set_pref("hide_values", on))
 
+        # -- mercado
+        self.mercado_real = Switch()
+        self.mercado_real.setChecked(workspace.mercado_real)
+        self.mercado_real.toggled.connect(self._alternar_mercado)
+
         self.range_buttons: dict[str, PillButton] = {}
         ranges = QHBoxLayout()
         ranges.setSpacing(6)
@@ -117,6 +122,7 @@ class SettingsPage(QWidget):
                 SettingRow("Ocultar valores", "Mascara saldos e valores em todas as telas. Também fica no ícone de olho do topo.", self.hide_values),
                 SettingRow("Período padrão do gráfico", "Usado ao abrir o app e ao trocar de aba.", range_box),
             ]),
+            SettingSection("MERCADO", [self._mercado_row()]),
             *([self._conexoes_section(conexoes, ouvintes)] if conexoes is not None else []),
             SettingSection("AGENTES", [
                 SettingRow("Novo agente", "Cada agente é uma carteira com seus próprios saldos. Clique com o botão direito numa aba "
@@ -149,7 +155,27 @@ class SettingsPage(QWidget):
         outer.addStretch(1)
 
         workspace.prefs_changed.connect(self.sync)
+        workspace.mercado_changed.connect(self.sync)
         self.sync()
+
+    def _mercado_row(self) -> SettingRow:
+        self._mercado_linha = SettingRow("Mercado real (Binance)", "", self.mercado_real)
+        return self._mercado_linha
+
+    def _alternar_mercado(self, ligado: bool) -> None:
+        if ligado:
+            texto = (f"Ligar o mercado real? Cada agente passa a ter uma carteira NOVA de US$ {CAPITAL_INICIAL_REAL:,.0f}".replace(",", ".") +
+                     " simulados, com os preços ao vivo da Binance. Os saldos, decisões e gráficos de demonstração saem de cena. "
+                     "As ordens continuam simuladas: nada é enviado à Binance.")
+            botao = "Ligar"
+        else:
+            texto = "Voltar aos dados de demonstração? As carteiras do mercado real serão descartadas."
+            botao = "Voltar"
+        if self._confirm("Mercado real", texto, botao):
+            self.ws.set_pref("mercado", "real" if ligado else "simulado")
+            self.notify.emit("Mercado real ligado" if ligado else "Demonstração restaurada", True)
+        else:
+            self.sync()  # recusou: o interruptor volta ao que era
 
     def _conexoes_section(self, servico: ServicoConexoes, ouvintes=None):
         from .conexoes import ConexoesSection  # import tardio: só quem usa conexões paga por elas
@@ -163,6 +189,11 @@ class SettingsPage(QWidget):
         self.hide_values.blockSignals(True)
         self.hide_values.setChecked(self.ws.pref("hide_values"))
         self.hide_values.blockSignals(False)
+        self.mercado_real.blockSignals(True)
+        self.mercado_real.setChecked(self.ws.mercado_real)
+        self.mercado_real.blockSignals(False)
+        self._mercado_linha.desc.setText(
+            "Preços ao vivo da Binance e carteira nova, sem dados simulados. As ordens são simuladas: nada é enviado à corretora.\n" + self.ws.status_mercado())
         for key, btn in self.range_buttons.items():
             btn.setChecked(key == self.ws.pref("default_range"))
         if not self.name.hasFocus():

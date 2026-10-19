@@ -7,6 +7,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from ubento.atualizador_mercado import AtualizadorDeMercado
 from ubento.caminhos import caminho_do_banco
 from ubento.conexoes import ServicoConexoes, cofre_padrao
 from ubento.consulta import abrir
@@ -46,9 +47,17 @@ def main() -> int:
     conexoes = ServicoConexoes(metas.repo, cofre_padrao(banco.parent))  # segredos no cofre do sistema, ao lado do banco
     # o bot do Telegram atende o chat vinculado enquanto o app estiver aberto; cada mensagem abre o banco SOMENTE para leitura
     ouvintes = GerenteOuvintes(conexoes, lambda: (lambda texto: responder(texto, lambda: abrir(banco))))
-    window = MainWindow(Workspace(QSettings(APP_NAME, APP_NAME)), metas=metas, conexoes=conexoes, ouvintes=ouvintes)
+    workspace = Workspace(QSettings(APP_NAME, APP_NAME))
+    window = MainWindow(workspace, metas=metas, conexoes=conexoes, ouvintes=ouvintes)
     ouvintes.iniciar_todos()
     app.aboutToQuit.connect(ouvintes.parar_todos)
+    # preços públicos da Binance: só lidos enquanto o modo mercado real estiver ligado (no simulado nada sai do computador)
+    mercado = AtualizadorDeMercado()
+    mercado.cotacoes.connect(workspace.receber_cotacoes)
+    mercado.falhou.connect(workspace.receber_falha)
+    workspace.mercado_changed.connect(lambda: mercado.definir_ativo(workspace.mercado_real))
+    mercado.definir_ativo(workspace.mercado_real)
+    app.aboutToQuit.connect(mercado.parar)
     window.show()
     return app.exec()
 
