@@ -1,7 +1,9 @@
 # UBento
 
-Painel financeiro de desktop, feito em **Python + PySide6** (SQLite entra na próxima etapa).
-Esta primeira fase é só interface: todas as telas funcionam com dados de demonstração em memória.
+Painel financeiro de desktop, feito em **Python + PySide6 + SQLite**. Agentes (carteiras) que decidem com regras de risco, metas conciliadas com
+evidência externa, preços ao vivo da Binance e consulta pelo Telegram e por MCP. O catálogo completo, com o estado de cada coisa, está em
+[`docs/FUNCIONALIDADES.md`](docs/FUNCIONALIDADES.md). Os dados de demonstração são o padrão; o **mercado real** (Configurações) usa preços vivos e
+nunca envia ordens.
 
 ## O que já funciona
 
