@@ -65,6 +65,10 @@ def test_o_dominio_da_carteira_nao_conhece_adaptadores_de_rede_nem_o_banco():
     assert quebras(dominio, ("ubento.conexoes", "ubento.persistencia", "ubento.ui")) == []
 
 
+def test_o_sql_das_carteiras_nao_conhece_o_dominio_nem_a_interface():
+    assert quebras(arquivos("persistencia"), ("ubento.ui", "ubento.store", "ubento.workspace", "ubento.engine", "ubento.carteira_serial")) == []
+
+
 def test_o_nucleo_nao_conhece_o_resto_do_app():
     resto = ("ubento.ui", "ubento.conexoes", "ubento.persistencia", "ubento.store", "ubento.engine", "ubento.workspace", "ubento.metas")
     assert quebras(arquivos("nucleo"), resto) == []

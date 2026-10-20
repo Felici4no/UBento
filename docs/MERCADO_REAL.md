@@ -13,7 +13,7 @@ Liga em **Configurações → Mercado → Mercado real (Binance)**. É um interr
 | Variação da carteira cripto | fixa | variação real de 7 dias da Binance, ponderada pelo valor de cada ativo |
 | Sinal dos agentes (estratégia Tendência) | simulado e limitado a −15%…+20% | variação real de 7 dias, sem cortes |
 
-Desligar descarta as carteiras do mercado real e volta a demonstração (com os preços originais).
+Desligar volta a demonstração (com os preços originais). As carteiras do mercado real ficam **guardadas** e voltam quando o modo é ligado de novo.
 
 ## Garantias
 
@@ -25,7 +25,7 @@ Desligar descarta as carteiras do mercado real e volta a demonstração (com os 
 
 ## Limitações conhecidas
 
-- **As carteiras do mercado real não persistem**: ao reiniciar o app, voltam ao capital inicial. (O modo em si persiste.)
+- A carteira do mercado real **persiste** (ver abaixo). Só ela: a demonstração continua efêmera.
 - Uma decisão **aprovada** e executada depois usa os valores da proposta, não o preço do momento da execução.
 - O swap manual ainda usa as taxas de demonstração (serviço 2,3% + gás).
 - Os pares são fixos: ETH, SOL, AVAX, BNB e USDC.

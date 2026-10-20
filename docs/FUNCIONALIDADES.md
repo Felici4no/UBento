@@ -42,7 +42,7 @@ Detalhes em [`MERCADO_REAL.md`](MERCADO_REAL.md).
 | Funcionalidade | Estado | Como funciona |
 |---|---|---|
 | Preços ao vivo | 🟡 | API pública da Binance (sem chave), a cada 15 s, em segundo plano. Consultada de verdade; falta uso prolongado. |
-| Carteira nova | 🟡 | US$ 10.000 simulados por agente, sem posições, decisões nem dados de demonstração. **Não persiste**: reiniciar volta ao capital inicial (o modo em si persiste). |
+| Carteira própria | ✅ | Na primeira vez, US$ 10.000 simulados por agente, sem posições, decisões nem dados de demonstração. **Persiste** no SQLite: reiniciar ou desligar e religar o modo devolve saldos, custo médio, decisões e gráfico. Ver [`PERSISTENCIA_CARTEIRAS.md`](PERSISTENCIA_CARTEIRAS.md). |
 | Histórico observado | ✅ | Gráfico do patrimônio realmente visto (um ponto por minuto); antes da carteira existir, a linha é o capital inicial. |
 | Sinal real dos agentes | ✅ | A estratégia Tendência usa a variação real de 7 dias, sem cortes. |
 | Segurança de preço | ✅ | Sem leitura nos últimos 120 s, agentes e swap não operam. Resposta inválida ou incompleta é descartada inteira. Falha de rede mantém o último preço e mostra o motivo. |
@@ -84,14 +84,14 @@ Detalhes em [`CONEXOES.md`](CONEXOES.md) e [`MCP_LOCAL.md`](MCP_LOCAL.md).
 
 | Item | Estado |
 |---|---|
-| Testes automatizados | ✅ 791 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
+| Testes automatizados | ✅ 829 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
 | Instalador Windows | 🟡 `scripts/build_windows.ps1` (PyInstaller + Inno Setup); não reexecutado nas últimas mudanças |
 | Capturas de tela | ✅ `scripts/screenshot.py` renderiza a janela inteira para conferir o visual |
 
 ## 7. O que ainda não existe
 
 - ⏳ **Ler dados da conta Binance** (saldos, execuções) como evidência externa: é o próximo passo natural da conexão.
-- ⏳ **Persistir as carteiras** do mercado real (e as de demonstração).
+- ⏳ Persistir as carteiras de **demonstração** (hoje só a do mercado real persiste, de propósito).
 - ⏳ **Agendador**: nada roda ou se avalia sozinho.
 - ⏳ **Executar ordens reais**: por decisão de projeto, o app só lê; isso exigiria uma mudança explícita de política e de permissão de chave.
 - ⏳ Testar Binance e Telegram contra os serviços reais, e o arrastar/redimensionar da janela com o mouse.

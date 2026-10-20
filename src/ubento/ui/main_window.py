@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from ..conexoes import CofreMemoria, ServicoConexoes
 from ..metas import ServicoMetas
+from ..persistencia_carteiras import PersistenciaCarteiras
 from ..ponte_metas import PonteCarteiraMetas
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
@@ -139,6 +140,9 @@ class MainWindow(QMainWindow):
         self.ponte = PonteCarteiraMetas(workspace, self.metas)
         self.ponte.falhou.connect(lambda m: self.toast.show_message(m, False))
         self.ponte.registrada.connect(self._execucao_registrada)
+        # as carteiras do mercado real voltam do banco ao abrir e são guardadas quando mudam (ADR-001, passo 4)
+        self.persistencia_carteiras = PersistenciaCarteiras(workspace, self.metas.repo)
+        self.persistencia_carteiras.falhou.connect(lambda m: self.toast.show_message(m, False))
         # sem serviço informado: conexões só em memória e com cofre temporário (testes e capturas nunca tocam o cofre real)
         self.conexoes = conexoes or ServicoConexoes(self.metas.repo, CofreMemoria())
         self.ouvintes = ouvintes  # ouvintes do bot do Telegram (None em testes e capturas)

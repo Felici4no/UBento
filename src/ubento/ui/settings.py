@@ -164,12 +164,12 @@ class SettingsPage(QWidget):
 
     def _alternar_mercado(self, ligado: bool) -> None:
         if ligado:
-            texto = (f"Ligar o mercado real? Cada agente passa a ter uma carteira NOVA de US$ {CAPITAL_INICIAL_REAL:,.0f}".replace(",", ".") +
-                     " simulados, com os preços ao vivo da Binance. Os saldos, decisões e gráficos de demonstração saem de cena. "
+            texto = (f"Ligar o mercado real? Cada agente passa a ter a sua carteira do mercado real: NOVA na primeira vez (US$ {CAPITAL_INICIAL_REAL:,.0f}".replace(",", ".") +
+                     " simulados) e, depois, a que ficou guardada. Os saldos, decisões e gráficos de demonstração saem de cena. "
                      "As ordens continuam simuladas: nada é enviado à Binance.")
             botao = "Ligar"
         else:
-            texto = "Voltar aos dados de demonstração? As carteiras do mercado real serão descartadas."
+            texto = "Voltar aos dados de demonstração? As carteiras do mercado real ficam guardadas e voltam quando você ligar o mercado real de novo."
             botao = "Voltar"
         if self._confirm("Mercado real", texto, botao):
             self.ws.set_pref("mercado", "real" if ligado else "simulado")

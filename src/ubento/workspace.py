@@ -43,6 +43,8 @@ class Workspace(QObject):
     agent_changed = Signal(str)  # configuração de um agente mudou (id)
     prefs_changed = Signal()
     mercado_changed = Signal()  # chegou uma leitura (ou uma falha) do mercado real
+    mercado_vai_mudar = Signal()  # logo antes de ligar/desligar o mercado real: quem guarda estado salva agora
+    agente_removido = Signal(str)  # id de um agente que saiu (remoção ou volta às abas padrão)
     decisao_executada = Signal(str, object)  # (id do agente, decisão): uma decisão com movimento foi executada
 
     def __init__(self, settings: QSettings | None = None, relogio: Callable[[], datetime] = datetime.now) -> None:
@@ -92,6 +94,7 @@ class Workspace(QObject):
 
     def _trocar_mercado(self, real: bool) -> None:
         """Liga/desliga o mercado real. Cada carteira recomeça no modo novo (nova com caixa, ou a demonstração) e o Geral acompanha."""
+        self.mercado_vai_mudar.emit()
         self.mercado.ligar() if real else self.mercado.desativar()
         for agent in self.agents:
             agent.store.definir_modo(real)
@@ -144,9 +147,12 @@ class Workspace(QObject):
 
     def restore_default_agents(self) -> None:
         """Volta ao conjunto inicial de agentes."""
+        saindo = [a.id for a in self.agents]
         self.agents = self._default_agents()
         self.overview_name = "Geral"
         self._commit()
+        for agent_id in saindo:
+            self.agente_removido.emit(agent_id)
 
     def _default_agents(self) -> list[Agent]:
         personal = self._make("Pessoal", COLORS[0], "main", 1.0)
@@ -262,6 +268,7 @@ class Workspace(QObject):
     def remove(self, agent_id: str) -> None:
         self.agents = [a for a in self.agents if a.id != agent_id]
         self._commit()
+        self.agente_removido.emit(agent_id)
 
     def rename(self, key: str, name: str) -> None:
         name = name.strip()
