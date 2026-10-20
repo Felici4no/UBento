@@ -35,7 +35,7 @@ class Agent:
     config: AgentConfig = field(default_factory=AgentConfig)
 
 
-DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1M", "mercado": "simulado"}
+DEFAULT_PREFS = {"user_name": "Você", "hide_values": False, "default_range": "1M", "mercado": "simulado", "agendador": True}
 
 
 class Workspace(QObject):
@@ -76,6 +76,8 @@ class Workspace(QObject):
         if key == "default_range" and value not in RANGES:
             return
         if key == "mercado" and value not in ("simulado", "real"):
+            return
+        if key == "agendador" and not isinstance(value, bool):
             return
         self.prefs[key] = value
         if key == "hide_values":

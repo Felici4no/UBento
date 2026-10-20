@@ -107,6 +107,6 @@ Tratar a carteira como painel de simulação e as metas como sistema à parte, a
 3. [x] **Fonte de preços e relógio injetáveis** (feito, A3): `ubento/mercado.py` traz `Mercado` (preços, sinais, frescor e relógio). Cada `Workspace` tem o seu e o entrega a todos os `Store`; um `Store` avulso cria o próprio. Não existem mais `ASSETS` nem `MERCADO` globais e o domínio e as telas não chamam `datetime.now()` (testado). O cadastro dos ativos (`ATIVOS`) é imutável.
 4. [x] **Persistir as carteiras do mercado real** (feito, A4): ver [`PERSISTENCIA_CARTEIRAS.md`](PERSISTENCIA_CARTEIRAS.md). Valores em texto decimal e instantes em UTC; carteira de agente removido é arquivada; as metas dele continuam no banco.
 5. [~] **Teste de arquitetura para as camadas** (parcial, `tests/test_camadas.py`): núcleo, persistência e conexões não importam a UI; o domínio da carteira não importa adaptadores nem banco; o núcleo não importa o resto do app. Falta a regra "a UI não importa `conexoes` direto, só serviços", que a UI de Configurações hoje não cumpre.
-6. [ ] **Agendador com relógio injetado**, ou esconder "próxima execução" até existir (A7).
+6. [x] **Agendador com relógio injetado** (feito, A7): ver [`AGENDADOR.md`](AGENDADOR.md). Os agentes rodam sozinhos na frequência deles com o app aberto; o relógio é o do `Mercado`.
 7. [ ] **Revisar a thread do Telegram** com o critério do atualizador de preços (A8).
 8. [ ] **Quebrar `store.py`** em mercado/preços, livro e dados de demonstração, quando o passo 3 ou 4 já tiver mexido nele (A5).

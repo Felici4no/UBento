@@ -84,6 +84,11 @@ class SettingsPage(QWidget):
         self.hide_values.setChecked(workspace.pref("hide_values"))
         self.hide_values.toggled.connect(lambda on: workspace.set_pref("hide_values", on))
 
+        # -- agentes
+        self.agendador_ligado = Switch()
+        self.agendador_ligado.setChecked(workspace.pref("agendador"))
+        self.agendador_ligado.toggled.connect(lambda on: workspace.set_pref("agendador", on))
+
         # -- mercado
         self.mercado_real = Switch()
         self.mercado_real.setChecked(workspace.mercado_real)
@@ -125,6 +130,8 @@ class SettingsPage(QWidget):
             SettingSection("MERCADO", [self._mercado_row()]),
             *([self._conexoes_section(conexoes, ouvintes)] if conexoes is not None else []),
             SettingSection("AGENTES", [
+                SettingRow("Rodar os agentes sozinhos", "Enquanto o UBento estiver aberto, cada agente roda na frequência dele (hora, dia ou semana). "
+                           "Perdeu um horário com o app fechado? Roda uma vez ao abrir. Desligado, só o botão “Rodar agora” executa.", self.agendador_ligado),
                 SettingRow("Novo agente", "Cada agente é uma carteira com seus próprios saldos. Clique com o botão direito numa aba "
                      "para renomear, mudar a cor, duplicar, mover ou remover.", new_agent),
             ]),
@@ -189,6 +196,9 @@ class SettingsPage(QWidget):
         self.hide_values.blockSignals(True)
         self.hide_values.setChecked(self.ws.pref("hide_values"))
         self.hide_values.blockSignals(False)
+        self.agendador_ligado.blockSignals(True)
+        self.agendador_ligado.setChecked(self.ws.pref("agendador"))
+        self.agendador_ligado.blockSignals(False)
         self.mercado_real.blockSignals(True)
         self.mercado_real.setChecked(self.ws.mercado_real)
         self.mercado_real.blockSignals(False)

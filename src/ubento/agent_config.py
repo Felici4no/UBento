@@ -161,6 +161,13 @@ def num(x: float) -> str:
     return f"{x:g}".replace(".", ",")
 
 
+def vencida(cfg: AgentConfig, referencia: datetime, agora: datetime) -> bool:
+    """O agente deve rodar agora? Vence o horário seguinte à `referencia` (a última execução). Pausado ou manual nunca vence."""
+    if not cfg.active or cfg.strategy == "manual":
+        return False
+    return next_run(cfg, referencia) <= agora
+
+
 def next_run(cfg: AgentConfig, now: datetime) -> datetime:
     if cfg.frequency == "hourly":
         return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)

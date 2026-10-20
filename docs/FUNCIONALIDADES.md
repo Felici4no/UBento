@@ -31,7 +31,7 @@ Configuração por agente (tela **Configurar**), salva na hora. Detalhes em [`RE
 | Parâmetros | ✅ | Risco 1–5, posição máxima por ativo, reserva em caixa, tamanho de cada compra, stop-loss, take-profit, desvio para rebalancear. A tela só mostra os relevantes ao algoritmo. |
 | Ativos permitidos | ✅ | ETH, SOL, AVAX, BNB (pelo menos um). |
 | Modo de execução | ✅ | **Automático** (executa), **Pedir aprovação** (propõe), **Só sugerir** (registra, nunca executa). |
-| Frequência | 🟡 | A cada hora / diária / semanal. Mostra a próxima execução, mas **nada roda sozinho**: o agente só decide em "Rodar agora". Não há agendador. |
+| Frequência e agendador | ✅ | A cada hora / diária (9h) / semanal (segunda, 9h). Com o app aberto, o agente roda sozinho no horário (um interruptor em Configurações desliga). Horários perdidos viram uma execução ao abrir; mercado real sem preço fresco espera. Só com o app aberto. Ver [`AGENDADOR.md`](AGENDADOR.md). |
 | Aprovar ≠ executar | ✅ | Aprovar uma proposta (✓) só autoriza; os saldos mudam quando a execução é registrada, num passo separado. |
 | **Regras de risco** (caixas) | ✅ | Risco por operação (0,5 · 0,75 · 1%), stop diário (2× · 3×), meta de ganho diária (2× · 3× · 4×) e tamanho da posição pela fórmula `risco ÷ stop`. Pacote padrão com um clique. Só as compras são limitadas; vendas nunca. |
 
@@ -84,7 +84,7 @@ Detalhes em [`CONEXOES.md`](CONEXOES.md) e [`MCP_LOCAL.md`](MCP_LOCAL.md).
 
 | Item | Estado |
 |---|---|
-| Testes automatizados | ✅ 829 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
+| Testes automatizados | ✅ 855 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
 | Instalador Windows | 🟡 `scripts/build_windows.ps1` (PyInstaller + Inno Setup); não reexecutado nas últimas mudanças |
 | Capturas de tela | ✅ `scripts/screenshot.py` renderiza a janela inteira para conferir o visual |
 
@@ -92,6 +92,6 @@ Detalhes em [`CONEXOES.md`](CONEXOES.md) e [`MCP_LOCAL.md`](MCP_LOCAL.md).
 
 - ⏳ **Ler dados da conta Binance** (saldos, execuções) como evidência externa: é o próximo passo natural da conexão.
 - ⏳ Persistir as carteiras de **demonstração** (hoje só a do mercado real persiste, de propósito).
-- ⏳ **Agendador**: nada roda ou se avalia sozinho.
+- ⏳ **Avaliação automática das metas**: o agendador roda os agentes, mas as metas só se avaliam quando alguém pede (reavaliar, registrar, vincular).
 - ⏳ **Executar ordens reais**: por decisão de projeto, o app só lê; isso exigiria uma mudança explícita de política e de permissão de chave.
 - ⏳ Testar Binance e Telegram contra os serviços reais, e o arrastar/redimensionar da janela com o mouse.

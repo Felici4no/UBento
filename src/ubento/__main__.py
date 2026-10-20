@@ -58,6 +58,8 @@ def main() -> int:
     workspace.mercado_changed.connect(lambda: mercado.definir_ativo(workspace.mercado_real))
     mercado.definir_ativo(workspace.mercado_real)
     app.aboutToQuit.connect(mercado.parar)
+    window.agendador.iniciar()  # os agentes rodam sozinhos na frequência deles, depois de um atraso para os preços chegarem
+    app.aboutToQuit.connect(window.agendador.parar)
     window.show()
     return app.exec()
 

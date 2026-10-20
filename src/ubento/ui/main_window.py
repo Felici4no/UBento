@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from ..conexoes import CofreMemoria, ServicoConexoes
 from ..metas import ServicoMetas
+from ..agendador import Agendador
 from ..persistencia_carteiras import PersistenciaCarteiras
 from ..ponte_metas import PonteCarteiraMetas
 from ..store import Store
@@ -143,6 +144,10 @@ class MainWindow(QMainWindow):
         # as carteiras do mercado real voltam do banco ao abrir e são guardadas quando mudam (ADR-001, passo 4)
         self.persistencia_carteiras = PersistenciaCarteiras(workspace, self.metas.repo)
         self.persistencia_carteiras.falhou.connect(lambda m: self.toast.show_message(m, False))
+        # os agentes rodam sozinhos na frequência deles enquanto o app estiver aberto (quem dá a partida é o `main`) (ADR-001, passo 6)
+        self.agendador = Agendador(workspace)
+        self.agendador.executou.connect(self._agente_rodou)
+        self.agendador.falhou.connect(lambda m: self.toast.show_message(m, False))
         # sem serviço informado: conexões só em memória e com cofre temporário (testes e capturas nunca tocam o cofre real)
         self.conexoes = conexoes or ServicoConexoes(self.metas.repo, CofreMemoria())
         self.ouvintes = ouvintes  # ouvintes do bot do Telegram (None em testes e capturas)
@@ -314,6 +319,10 @@ class MainWindow(QMainWindow):
             page.back_requested.connect(lambda: self.select(agent_id))
             self.pages[key] = self._scroll(page)
         self.select(key)
+
+    def _agente_rodou(self, agent_id: str, _feitas: int, mensagem: str) -> None:
+        agente = self.workspace.agent(agent_id)
+        self.toast.show_message(f"{agente.name if agente else 'Agente'}: {mensagem}", True)
 
     def _execucao_registrada(self, meta_id: str, _execucao_id: str) -> None:
         """Uma compra do agente entrou numa meta: se a tela de Metas daquele agente já está aberta, ela se atualiza."""

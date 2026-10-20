@@ -200,6 +200,7 @@ class AgentConfigPage(QWidget):
         outer.addStretch(1)
 
         workspace.agent_changed.connect(self._on_agent_changed)
+        workspace.prefs_changed.connect(self.sync)
         workspace.changed.connect(self.sync)
         self.sync()
 
@@ -307,7 +308,16 @@ class AgentConfigPage(QWidget):
             self.schedule.setText("Sem execuções agendadas.")
             return
         last = f"Última execução: {_when(datetime.fromisoformat(cfg.last_run), now)}  ·  " if cfg.last_run else "Ainda não rodou  ·  "
-        self.schedule.setText(f"{last}próxima: {_when(next_run(cfg, now), now)}")
+        if not self.ws.pref("agendador"):
+            self.schedule.setText(f"{last}execução automática desligada em Configurações: só “Rodar agora” executa")
+            return
+        try:
+            referencia = datetime.fromisoformat(cfg.last_run) if cfg.last_run else now
+        except ValueError:
+            referencia = now
+        proxima = next_run(cfg, referencia)
+        quando = "vencida, roda em instantes" if proxima <= now else _when(proxima, now)
+        self.schedule.setText(f"{last}próxima: {quando}  ·  roda só com o app aberto")
 
     # -- ações ---------------------------------------------------------------
 
