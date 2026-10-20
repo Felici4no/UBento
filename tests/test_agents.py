@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings  # noqa: E402
 
 from ubento.agent_config import PARAMS, RELEVANT, STRATEGIES, AgentConfig, describe, next_run  # noqa: E402
 from ubento.engine import decide, momentum  # noqa: E402
+from ubento.mercado import Mercado  # noqa: E402
 from ubento.store import Store  # noqa: E402
 from ubento.workspace import Workspace  # noqa: E402
 
@@ -52,8 +53,9 @@ def test_next_run_is_in_the_future():
 
 
 def test_momentum_signal_is_deterministic_and_bounded():
-    assert momentum("ETH", NOW.date()) == momentum("ETH", NOW.date())
-    assert all(-15 <= momentum(s, NOW.date()) <= 20 for s in ("ETH", "SOL", "AVAX", "BNB"))
+    mercado = Mercado()
+    assert momentum("ETH", NOW.date(), mercado) == momentum("ETH", NOW.date(), mercado)
+    assert all(-15 <= momentum(s, NOW.date(), mercado) <= 20 for s in ("ETH", "SOL", "AVAX", "BNB"))
 
 
 def test_manual_and_paused_agents_decide_nothing(store):

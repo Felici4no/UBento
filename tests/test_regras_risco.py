@@ -32,12 +32,12 @@ def cfg(**extra):
     return AgentConfig(**{**base, **extra}).validated()
 
 
-def compra(usd=3000.0, simbolo="ETH"):
-    return engine._buy(simbolo, usd, "Compra recorrente", AGORA)
+def compra(store, usd=3000.0, simbolo="ETH"):
+    return engine._buy(store.mercado, simbolo, usd, "Compra recorrente", AGORA)
 
 
-def venda(usd=500.0):
-    return engine._sell("ETH", usd, "Realizou lucro", AGORA)
+def venda(store, usd=500.0):
+    return engine._sell(store.mercado, "ETH", usd, "Realizou lucro", AGORA)
 
 
 def resultado(store, pnl, quando=AGORA, status="executed"):
@@ -48,56 +48,56 @@ def resultado(store, pnl, quando=AGORA, status="executed"):
 
 
 def test_compra_maior_que_o_risco_e_reduzida_ao_tamanho_da_formula(store):
-    (d,) = engine._aplicar_regras(cfg(), store, [compra(3000.0)], AGORA)
+    (d,) = engine._aplicar_regras(cfg(), store, [compra(store, 3000.0)], AGORA)
     assert (d.trade.usd, d.trade.fee, d.value_usd) == (1250.0, 1.25, 1250.0)  # 1% de 10.000 = 100 de risco; 100 / 8% = 1.250
     assert "risco de 1%" in d.detail and "1.250,00" in d.detail and "3.000,00" in d.detail  # a decisão explica o ajuste
-    assert d.trade.qty * engine.ASSETS["ETH"].price == pytest.approx(1248.75, abs=0.02)
+    assert d.trade.qty * store.mercado.preco("ETH") == pytest.approx(1248.75, abs=0.02)
 
 
 def test_risco_de_meio_por_cento_corta_pela_metade(store):
-    (d,) = engine._aplicar_regras(cfg(rule_risk_pct=0.5), store, [compra(3000.0)], AGORA)
+    (d,) = engine._aplicar_regras(cfg(rule_risk_pct=0.5), store, [compra(store, 3000.0)], AGORA)
     assert d.trade.usd == 625.0  # 50 / 0,08
 
 
 def test_compra_menor_que_o_risco_nao_e_aumentada_sem_a_regra_de_tamanho(store):
-    original = compra(500.0)
+    original = compra(store, 500.0)
     (d,) = engine._aplicar_regras(cfg(), store, [original], AGORA)
     assert d is original
 
 
 def test_regra_de_tamanho_usa_a_formula_mesmo_quando_a_estrategia_pediria_menos(store):
-    (d,) = engine._aplicar_regras(cfg(rule_sizing=True), store, [compra(500.0)], AGORA)
+    (d,) = engine._aplicar_regras(cfg(rule_sizing=True), store, [compra(store, 500.0)], AGORA)
     assert d.trade.usd == 1250.0
 
 
 def test_tamanho_pela_formula_nunca_passa_do_caixa_disponivel(store):
-    store.holdings = {"USD": 500.0, "ETH": 9500.0 / engine.ASSETS["ETH"].price}  # conta de 10.000, mas só 500 em caixa
-    (d,) = engine._aplicar_regras(cfg(rule_sizing=True, reserve_pct=0), store, [compra(300.0, "SOL")], AGORA)
+    store.holdings = {"USD": 500.0, "ETH": 9500.0 / store.mercado.preco("ETH")}  # conta de 10.000, mas só 500 em caixa
+    (d,) = engine._aplicar_regras(cfg(rule_sizing=True, reserve_pct=0), store, [compra(store, 300.0, "SOL")], AGORA)
     assert d.trade.usd == 500.0  # a fórmula pediria 1.250
 
 
 def test_caixa_dividido_entre_varias_compras_do_mesmo_lote(store):
     # gastável: 10.000 − 60% de reserva = 4.000. Três compras de 1.250 cabem (3.750); a quarta recebe só os 250 que sobram
-    lote = [compra(300.0, s) for s in ("ETH", "SOL", "BNB", "AVAX")]
+    lote = [compra(store, 300.0, s) for s in ("ETH", "SOL", "BNB", "AVAX")]
     out = engine._aplicar_regras(cfg(rule_sizing=True, reserve_pct=60, max_position_pct=100), store, lote, AGORA)
     assert [d.trade.usd for d in out] == [1250.0, 1250.0, 1250.0, 250.0]
 
 
 def test_tamanho_pela_formula_respeita_a_posicao_maxima_por_ativo(store):
-    (d,) = engine._aplicar_regras(cfg(rule_sizing=True, max_position_pct=10), store, [compra(300.0)], AGORA)
+    (d,) = engine._aplicar_regras(cfg(rule_sizing=True, max_position_pct=10), store, [compra(store, 300.0)], AGORA)
     assert d.trade.usd == 1000.0  # 10% de 10.000 = teto por ativo, menor que os 1.250 da fórmula
 
 
 def test_compra_que_ficaria_abaixo_do_minimo_some(store):
     pequeno = Store(now=AGORA)
     pequeno.holdings, pequeno.cost_basis, pequeno.decisions = {"USD": 50.0}, {}, []
-    (hold,) = engine._aplicar_regras(cfg(), pequeno, [compra(40.0)], AGORA)  # 1% de 50 = 0,50 de risco; 0,50 / 8% = 6,25: abaixo do mínimo de US$ 10
+    (hold,) = engine._aplicar_regras(cfg(), pequeno, [compra(store, 40.0)], AGORA)  # 1% de 50 = 0,50 de risco; 0,50 / 8% = 6,25: abaixo do mínimo de US$ 10
     assert hold.kind == "hold" and "mínimo" in hold.detail
 
 
 def test_vendas_nunca_sao_reduzidas(store):
     store.holdings = {"USD": 0.0, "ETH": 5.0}
-    original = venda(9000.0)
+    original = venda(store, 9000.0)
     assert engine._aplicar_regras(cfg(), store, [original], AGORA) == [original]
 
 
@@ -107,32 +107,32 @@ def test_vendas_nunca_sao_reduzidas(store):
 def test_stop_diario_bloqueia_compras_no_limite_e_deixa_as_vendas(store):
     resultado(store, -200.0)  # 2 × (1% de 10.000) = 200
     regras = cfg(rule_daily_stop=True, rule_daily_stop_x=2)
-    out = engine._aplicar_regras(regras, store, [compra(500.0), venda(300.0)], AGORA)
+    out = engine._aplicar_regras(regras, store, [compra(store, 500.0), venda(store, 300.0)], AGORA)
     assert [d.kind for d in out] == ["sell"]  # reduzir risco continua permitido
-    (hold,) = engine._aplicar_regras(regras, store, [compra(500.0)], AGORA)
+    (hold,) = engine._aplicar_regras(regras, store, [compra(store, 500.0)], AGORA)
     assert hold.kind == "hold" and "Stop diário atingido" in hold.detail and "−US$ 200,00" in hold.detail
 
 
 def test_um_centavo_antes_do_stop_ainda_compra(store):
     resultado(store, -199.99)
-    (d,) = engine._aplicar_regras(cfg(rule_daily_stop=True), store, [compra(500.0)], AGORA)
+    (d,) = engine._aplicar_regras(cfg(rule_daily_stop=True), store, [compra(store, 500.0)], AGORA)
     assert d.kind == "buy"
 
 
 def test_stop_de_tres_vezes_o_risco(store):
     resultado(store, -250.0)
-    assert engine._aplicar_regras(cfg(rule_daily_stop=True, rule_daily_stop_x=3), store, [compra(500.0)], AGORA)[0].kind == "buy"  # limite 300
+    assert engine._aplicar_regras(cfg(rule_daily_stop=True, rule_daily_stop_x=3), store, [compra(store, 500.0)], AGORA)[0].kind == "buy"  # limite 300
     resultado(store, -50.0)
-    assert engine._aplicar_regras(cfg(rule_daily_stop=True, rule_daily_stop_x=3), store, [compra(500.0)], AGORA)[0].kind == "hold"  # −300
+    assert engine._aplicar_regras(cfg(rule_daily_stop=True, rule_daily_stop_x=3), store, [compra(store, 500.0)], AGORA)[0].kind == "hold"  # −300
 
 
 def test_meta_diaria_para_de_comprar_para_nao_devolver_o_lucro(store):
     resultado(store, 300.0)  # 3 × 100
-    (hold,) = engine._aplicar_regras(cfg(rule_daily_goal=True, rule_daily_goal_x=3), store, [compra(500.0)], AGORA)
+    (hold,) = engine._aplicar_regras(cfg(rule_daily_goal=True, rule_daily_goal_x=3), store, [compra(store, 500.0)], AGORA)
     assert hold.kind == "hold" and "Meta diária atingida" in hold.detail and "+US$ 300,00" in hold.detail
     store.decisions.clear()
     resultado(store, 299.99)
-    assert engine._aplicar_regras(cfg(rule_daily_goal=True), store, [compra(500.0)], AGORA)[0].kind == "buy"
+    assert engine._aplicar_regras(cfg(rule_daily_goal=True), store, [compra(store, 500.0)], AGORA)[0].kind == "buy"
 
 
 def test_o_resultado_do_dia_so_conta_o_que_foi_executado_hoje(store):
@@ -145,7 +145,7 @@ def test_o_resultado_do_dia_so_conta_o_que_foi_executado_hoje(store):
 
 
 def test_sem_a_caixa_de_risco_nada_muda_mesmo_com_as_outras_marcadas(store):
-    original = [compra(3000.0)]
+    original = [compra(store, 3000.0)]
     c = cfg(rule_risk=False, rule_daily_stop=True, rule_daily_goal=True, rule_sizing=True).validated()
     assert not (c.rule_daily_stop or c.rule_daily_goal or c.rule_sizing)  # dependem do risco por operação
     assert engine._aplicar_regras(c, store, original, AGORA) is original

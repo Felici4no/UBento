@@ -61,7 +61,7 @@ def test_nucleo_persistencia_e_conexoes_nao_importam_a_interface():
 
 
 def test_o_dominio_da_carteira_nao_conhece_adaptadores_de_rede_nem_o_banco():
-    dominio = arquivos("store", "engine", "agent_config", "formatting", "workspace", "cotacoes")
+    dominio = arquivos("store", "engine", "agent_config", "formatting", "workspace", "cotacoes", "mercado")
     assert quebras(dominio, ("ubento.conexoes", "ubento.persistencia", "ubento.ui")) == []
 
 

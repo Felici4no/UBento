@@ -7,7 +7,8 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QButtonGroup, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 from ..formatting import amount, is_hidden, money, number, pct, short_date
-from ..store import ASSETS, RANGES
+from ..mercado import ATIVOS
+from ..store import RANGES
 from . import theme
 from .cards.agents import AgentList
 from .cards.coin import Sparkline
@@ -72,7 +73,7 @@ class AssetTable(QWidget):
         out = []
         for sym, qty in self.store.holdings.items():
             if qty > 0:
-                price = ASSETS[sym].price
+                price = self.store.mercado.preco(sym)
                 out.append((sym, qty, price, qty * price, qty * price / total))
         return sorted(out, key=lambda r: r[3], reverse=True)
 
@@ -98,10 +99,10 @@ class AssetTable(QWidget):
             p.drawText(QRectF(48, y + 10, 160, 22), Qt.AlignmentFlag.AlignVCenter, sym)
             p.setPen(QColor(theme.MUTED))
             p.setFont(theme.font(12, W.Normal))
-            p.drawText(QRectF(48, y + 32, 160, 18), Qt.AlignmentFlag.AlignVCenter, ASSETS[sym].name)
+            p.drawText(QRectF(48, y + 32, 160, 18), Qt.AlignmentFlag.AlignVCenter, ATIVOS[sym].name)
 
             p.setFont(theme.font(15, W.Medium))
-            cells = {"qty": amount(qty, ASSETS[sym].decimals), "price": f"${number(price, 2)}", "value": money(value)}
+            cells = {"qty": amount(qty, ATIVOS[sym].decimals), "price": f"${number(price, 2)}", "value": money(value)}
             for key, text in cells.items():
                 p.setPen(QColor(theme.TEXT if key == "value" else theme.MUTED))
                 p.drawText(QRectF(right[key] - 140, y, 140, self.ROW), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, text)
@@ -314,7 +315,7 @@ def coin_view(dash, _ws):
     spark.set_values(series)
     spark.setMinimumHeight(300)
     held = s.holdings.get("USDC", 0.0)
-    price = ASSETS["USDC"].price
+    price = s.mercado.preco("USDC")
     change = (series[-1] / series[0] - 1) * 100
     box = QWidget()
     v = QVBoxLayout(box)

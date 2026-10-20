@@ -15,71 +15,15 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QObject, Signal
 
+from .mercado import ATIVOS, AGUARDANDO_PRECOS, Mercado
+
 SERVICE_FEE_RATE = 0.023
 GAS_FEE_USD = 1.32
 TRADE_FEE_RATE = 0.001  # taxa de 0,10% sobre cada compra/venda dos agentes (a mesma da Binance spot)
 CAPITAL_INICIAL_REAL = 10_000.0  # caixa (em USD) de cada carteira nova do modo mercado real; as ordens são simuladas, nunca enviadas à corretora
-PRECO_VALIDO_S = 120  # sem cotação mais nova que isso, o modo real não opera
 
 
-@dataclass(frozen=True)
-class Asset:
-    symbol: str
-    name: str
-    price: float  # em USD
-    decimals: int
-
-
-ASSETS: dict[str, Asset] = {
-    a.symbol: a
-    for a in (
-        Asset("USD", "Dólar", 1.0, 2),
-        Asset("ETH", "Ethereum", 3852.93, 5),
-        Asset("SOL", "Solana", 184.62, 4),
-        Asset("AVAX", "Avalanche", 37.50, 3),
-        Asset("BNB", "BNB", 651.11, 4),
-        Asset("USDT", "Tether", 1.0, 2),
-        Asset("USDC", "USD Coin", 0.996, 2),
-    )
-}
 CRYPTO_ORDER = ["SOL", "AVAX", "ETH", "BNB", "USDT"]
-PRECOS_DEMO = {s: a.price for s, a in ASSETS.items()}
-
-
-class MercadoAoVivo:
-    """Estado global do modo mercado real: os preços de `ASSETS` passam a ser os da Binance e os sinais dos agentes, a variação real de 7 dias.
-
-    Ao desligar, os preços originais da demonstração voltam. Cotação velha (mais de `PRECO_VALIDO_S`) ou ausente bloqueia qualquer operação.
-    """
-
-    def __init__(self) -> None:
-        self.ativo = False
-        self.variacao_7d: dict[str, float] = {}
-        self.atualizado_em: datetime | None = None
-        self.erro: str | None = None
-
-    def ligar(self) -> None:
-        self.ativo = True
-
-    def desativar(self) -> None:
-        self.ativo = False
-        self.variacao_7d, self.atualizado_em, self.erro = {}, None, None
-        for simbolo, preco in PRECOS_DEMO.items():
-            ASSETS[simbolo] = replace(ASSETS[simbolo], price=preco)
-
-    def aplicar(self, precos: dict[str, float], variacao_7d: dict[str, float], agora: datetime) -> None:
-        for simbolo, preco in precos.items():
-            if simbolo in ASSETS:
-                ASSETS[simbolo] = replace(ASSETS[simbolo], price=preco)
-        self.variacao_7d = dict(variacao_7d)
-        self.atualizado_em, self.erro = agora, None
-
-    def fresco(self, agora: datetime) -> bool:
-        return self.ativo and self.atualizado_em is not None and timedelta(0) <= agora - self.atualizado_em <= timedelta(seconds=PRECO_VALIDO_S)
-
-
-MERCADO = MercadoAoVivo()
-AGUARDANDO_PRECOS = "Aguardando os preços ao vivo da Binance"
 
 # (nº de barras, dias por barra, variação alvo do período)
 RANGES: dict[str, tuple[int, int, float]] = {
@@ -150,14 +94,14 @@ DECISION_POOL: list[tuple[str, str, str, str, str | None, float, float | None]] 
 ]
 
 
-def demo_decisions(seed: str, now: datetime) -> list[Decision]:
+def demo_decisions(seed: str, now: datetime, mercado: Mercado) -> list[Decision]:
     rng = random.Random(f"ubento-{seed}-decisions")
     picks = rng.sample(DECISION_POOL, 8)
     out, when = [], now - timedelta(minutes=rng.randint(20, 150))
     for kind, title, detail, amount, symbol, qty, ganho in picks:
         livro: dict = {}
         if symbol:  # o histórico de demonstração também traz valor, taxa e resultado, no mesmo critério das decisões executadas agora
-            valor = round(qty * ASSETS[symbol].price, 2)
+            valor = round(qty * mercado.preco(symbol), 2)
             taxa = round(valor * TRADE_FEE_RATE, 2)
             if kind == "buy":
                 livro = dict(value_usd=valor, fee_usd=taxa, pnl_usd=-taxa, pnl_realizado=False)  # em aberto: no ato só se perdeu a taxa
@@ -168,8 +112,9 @@ def demo_decisions(seed: str, now: datetime) -> list[Decision]:
     return out
 
 
-def make_quote(send: str, receive: str, amount: float) -> Quote:
-    ps, pr = ASSETS[send].price, ASSETS[receive].price
+def make_quote(send: str, receive: str, amount: float, mercado: Mercado | None = None) -> Quote:
+    mercado = mercado or Mercado()  # sem mercado informado: preços de demonstração
+    ps, pr = mercado.preco(send), mercado.preco(receive)
     rate = pr / ps
     if amount <= 0 or send == receive:
         return Quote(send, receive, max(amount, 0.0), 0.0, 0.0, 0.0, 0.0, rate)
@@ -183,9 +128,10 @@ class Store(QObject):
     changed = Signal()
     executed = Signal(object)  # uma decisão com movimento acabou de ser executada (já com valor, taxa e resultado preenchidos)
 
-    def __init__(self, now: datetime | None = None, seed: str = "main", scale: float = 1.0, real: bool = False) -> None:
+    def __init__(self, now: datetime | None = None, seed: str = "main", scale: float = 1.0, real: bool = False, mercado: Mercado | None = None) -> None:
         super().__init__()
-        self.now = now or datetime.now()
+        self.mercado = mercado or Mercado()  # preços, sinais, frescor e relógio; o Workspace entrega o mesmo a todas as carteiras
+        self.now = now or self.mercado.agora()
         self.seed = seed
         self.scale = scale
         self.real = real  # modo mercado real: carteira nova, preços ao vivo, histórico observado
@@ -201,7 +147,7 @@ class Store(QObject):
 
     def _load_real(self) -> None:
         """Carteira nova: só caixa, sem custo de aquisição, sem decisões, sem atividade e sem nenhum número simulado."""
-        self.holdings = {s: 0.0 for s in ASSETS}
+        self.holdings = {s: 0.0 for s in ATIVOS}
         self.holdings["USD"] = CAPITAL_INICIAL_REAL
         self.cost_basis = {}
         self.spent = self.income = 0.0
@@ -231,10 +177,10 @@ class Store(QObject):
         else:
             self.pontos.append((agora, total))
         del self.pontos[:-20_000]
-        self.usdc_observado = (self.usdc_observado + [ASSETS["USDC"].price])[-44:]
+        self.usdc_observado = (self.usdc_observado + [self.mercado.preco("USDC")])[-44:]
         pesos = {s: self.value_usd(s) for s in CRYPTO_ORDER if self.value_usd(s) > 0}
         soma = sum(pesos.values())
-        self.crypto_change = sum(v * MERCADO.variacao_7d.get(s, 0.0) for s, v in pesos.items()) / soma if soma else 0.0
+        self.crypto_change = sum(v * self.mercado.variacao_7d.get(s, 0.0) for s, v in pesos.items()) / soma if soma else 0.0
 
     def _load_demo(self) -> None:
         scale = self.scale
@@ -243,13 +189,13 @@ class Store(QObject):
         # custo de aquisição (USD) do que está em carteira: base para o resultado realizado das vendas. Demonstração: o preço de entrada
         # de cada ativo é 22% abaixo a 18% acima do preço atual, de forma determinística por agente.
         self.cost_basis: dict[str, float] = {
-            s: round(q * ASSETS[s].price * random.Random(f"ubento-basis-{self.seed}-{s}").uniform(0.82, 1.18), 8) for s, q in self.holdings.items() if s != "USD"
+            s: round(q * self.mercado.preco(s) * random.Random(f"ubento-basis-{self.seed}-{s}").uniform(0.82, 1.18), 8) for s, q in self.holdings.items() if s != "USD"
         }
         self.spent = 1144.0 * scale
         self.income = 3226.0 * scale
         self.crypto_change = 1.7
         self.activity = self._make_activity()
-        self.decisions: list[Decision] = demo_decisions(self.seed, self.now)
+        self.decisions: list[Decision] = demo_decisions(self.seed, self.now, self.mercado)
 
     def reset(self) -> None:
         """Volta ao estado inicial do modo atual (as telas se atualizam via `changed`)."""
@@ -259,8 +205,8 @@ class Store(QObject):
     # -- agregação (aba "Geral") ---------------------------------------------
 
     @classmethod
-    def combined(cls, parts: list[Store], now: datetime | None = None, real: bool = False) -> Store:
-        store = cls(now=now, seed="geral", real=real)
+    def combined(cls, parts: list[Store], now: datetime | None = None, real: bool = False, mercado: Mercado | None = None) -> Store:
+        store = cls(now=now, seed="geral", real=real, mercado=mercado)
         store.readonly = True
         store.set_parts(parts)
         return store
@@ -275,7 +221,7 @@ class Store(QObject):
 
     def _sync(self) -> None:
         parts = self._parts
-        self.holdings = {sym: round(sum(p.holdings.get(sym, 0.0) for p in parts), 8) for sym in ASSETS}
+        self.holdings = {sym: round(sum(p.holdings.get(sym, 0.0) for p in parts), 8) for sym in ATIVOS}
         self.spent = sum(p.spent for p in parts)
         self.income = sum(p.income for p in parts)
         self.crypto_change = sum(p.crypto_change for p in parts) / len(parts) if parts else 0.0
@@ -291,7 +237,7 @@ class Store(QObject):
     # -- patrimônio --------------------------------------------------------
 
     def value_usd(self, symbol: str) -> float:
-        return self.holdings.get(symbol, 0.0) * ASSETS[symbol].price
+        return self.holdings.get(symbol, 0.0) * self.mercado.preco(symbol)
 
     def total_usd(self) -> float:
         return sum(self.value_usd(s) for s in self.holdings)
@@ -336,14 +282,14 @@ class Store(QObject):
 
     def usdc_series(self) -> list[float]:
         if self.real:
-            obs = self.usdc_observado or [ASSETS["USDC"].price]
+            obs = self.usdc_observado or [self.mercado.preco("USDC")]
             return obs if len(obs) > 1 else obs * 2
         rng = random.Random(f"ubento-{self.seed}-usdc")
         n = 44
         raw = [rng.gauss(0, 0.0012) for _ in range(n)]
         for i in range(1, n):  # passeio com leve reversão
             raw[i] = raw[i - 1] * 0.7 + raw[i]
-        first, last = 0.9963, ASSETS["USDC"].price
+        first, last = 0.9963, self.mercado.preco("USDC")
         lo, hi = raw[0], raw[-1]
         return [first + (last - first) * i / (n - 1) + (r - (lo + (hi - lo) * i / (n - 1))) * 0.6 for i, r in enumerate(raw)]
 
@@ -426,7 +372,7 @@ class Store(QObject):
             pnl = self.executar_trade(d.trade)
             if pnl is None:
                 return "Saldo insuficiente para registrar a execução"
-        self.decisions[index] = replace(self._com_livro(d, pnl), status="executed", moment=now or datetime.now())
+        self.decisions[index] = replace(self._com_livro(d, pnl), status="executed", moment=now or self.mercado.agora())
         self.changed.emit()
         if d.trade:
             self.executed.emit(self.decisions[index])
@@ -454,13 +400,13 @@ class Store(QObject):
     # -- troca -------------------------------------------------------------
 
     def quote(self, send: str, receive: str, amount: float) -> Quote:
-        return make_quote(send, receive, amount)
+        return make_quote(send, receive, amount, self.mercado)
 
     def validate(self, send: str, receive: str, amount: float) -> str | None:
         """Devolve o motivo de a troca não poder acontecer, ou None se está ok."""
         if self.readonly:
             return "Escolha um agente para fazer swap"
-        if self.real and not MERCADO.fresco(datetime.now()):
+        if self.real and not self.mercado.fresco():
             return AGUARDANDO_PRECOS
         if send == receive:
             return "Escolha moedas diferentes"
@@ -483,18 +429,19 @@ class Store(QObject):
         custo = amount if send == "USD" else self.cost_basis.get(send, 0.0) * (amount / em_carteira if em_carteira else 0.0)
         if send != "USD":
             self.cost_basis[send] = round(self.cost_basis.get(send, 0.0) - custo, 8)
-        recebido_usd = q.receive_amount * ASSETS[receive].price
+        recebido_usd = q.receive_amount * self.mercado.preco(receive)
         if receive != "USD":
             self.cost_basis[receive] = round(self.cost_basis.get(receive, 0.0) + recebido_usd, 8)
         self.holdings[send] = round(self.holdings[send] - amount, 8)
         self.holdings[receive] = round(self.holdings.get(receive, 0.0) + q.receive_amount, 8)
-        decimals = ASSETS[receive].decimals
+        decimals = ATIVOS[receive].decimals
+        agora = self.mercado.agora()
         effect = f"+ {q.receive_amount:,.{decimals}f} {receive}".replace(",", "X").replace(".", ",").replace("X", ".")
         self.decisions.insert(0, Decision(
-            "swap", f"Swap {send} → {receive}", "Executado manualmente por você", effect, datetime.now(),
+            "swap", f"Swap {send} → {receive}", "Executado manualmente por você", effect, agora,
             value_usd=round(q.value_usd, 2), fee_usd=round(q.service_fee_usd + q.gas_fee_usd, 2), pnl_usd=round(recebido_usd - custo, 2), pnl_realizado=True,
         ))
-        today = datetime.now().date()
+        today = agora.date()
         self.activity[today] = self.activity.get(today, 0) + 1
         self.changed.emit()
         return None

@@ -14,43 +14,44 @@ from datetime import date, datetime
 
 from .agent_config import AgentConfig, num
 from .formatting import number, pct
-from .store import ASSETS, CRYPTO_ORDER, MERCADO, TRADE_FEE_RATE, Decision, Store, Trade
+from .mercado import ATIVOS, Mercado
+from .store import CRYPTO_ORDER, TRADE_FEE_RATE, Decision, Store, Trade
 
 MIN_TRADE_USD = 10.0
 
 
-def momentum(symbol: str, day: date) -> float:
+def momentum(symbol: str, day: date, mercado: Mercado) -> float:
     """Variação do ativo nos últimos 7 dias, em %: a real da Binance no modo mercado real; no demonstrativo, uma simulada e limitada."""
-    if MERCADO.ativo:
-        return MERCADO.variacao_7d.get(symbol, 0.0)
+    if mercado.ativo:
+        return mercado.variacao_7d.get(symbol, 0.0)
     rng = random.Random(f"ubento-mom-{symbol}-{day.isoformat()}")
     return max(-15.0, min(20.0, rng.gauss(2.5, 8.0)))
 
 
-def _trade(side: str, symbol: str, usd: float) -> Trade:
+def _trade(mercado: Mercado, side: str, symbol: str, usd: float) -> Trade:
     """Compra: `usd` é o caixa que sai; a taxa sai do que se recebe (unidades líquidas). Venda: `usd` é qty × preço; a taxa sai do que entra."""
-    asset = ASSETS[symbol]
+    preco, casas = mercado.preco(symbol), ATIVOS[symbol].decimals
     if side == "buy":
         taxa = round(usd * TRADE_FEE_RATE, 2)
-        qty = round((usd - taxa) / asset.price, asset.decimals)
-        return Trade(side, symbol, qty, round(usd, 2), taxa, asset.price)
-    qty = round(usd / asset.price, asset.decimals)
-    valor = round(qty * asset.price, 2)
-    return Trade(side, symbol, qty, valor, round(valor * TRADE_FEE_RATE, 2), asset.price)
+        qty = round((usd - taxa) / preco, casas)
+        return Trade(side, symbol, qty, round(usd, 2), taxa, preco)
+    qty = round(usd / preco, casas)
+    valor = round(qty * preco, 2)
+    return Trade(side, symbol, qty, valor, round(valor * TRADE_FEE_RATE, 2), preco)
 
 
 def _effect(trade: Trade) -> str:
     sign = "+" if trade.side == "buy" else "-"
-    return f"{sign} {number(trade.qty, ASSETS[trade.symbol].decimals)} {trade.symbol}"
+    return f"{sign} {number(trade.qty, ATIVOS[trade.symbol].decimals)} {trade.symbol}"
 
 
-def _buy(symbol: str, usd: float, detail: str, now: datetime, kind: str = "buy", title: str | None = None) -> Decision:
-    t = _trade("buy", symbol, usd)
+def _buy(mercado: Mercado, symbol: str, usd: float, detail: str, now: datetime, kind: str = "buy", title: str | None = None) -> Decision:
+    t = _trade(mercado, "buy", symbol, usd)
     return Decision(kind, title or f"Comprou {symbol}", detail, _effect(t), now, trade=t, value_usd=t.usd, fee_usd=t.fee, pnl_realizado=False)
 
 
-def _sell(symbol: str, usd: float, detail: str, now: datetime, kind: str = "sell", title: str | None = None) -> Decision:
-    t = _trade("sell", symbol, usd)
+def _sell(mercado: Mercado, symbol: str, usd: float, detail: str, now: datetime, kind: str = "sell", title: str | None = None) -> Decision:
+    t = _trade(mercado, "sell", symbol, usd)
     return Decision(kind, title or f"Vendeu {symbol}", detail, _effect(t), now, trade=t, value_usd=t.usd, fee_usd=t.fee)
 
 
@@ -76,20 +77,20 @@ def _momentum(cfg: AgentConfig, store: Store, now: datetime) -> list[Decision]:
     total, spendable = _cash(cfg, store)
     buy_threshold = 9.0 - 1.2 * cfg.risk
     size_factor = 0.6 + 0.2 * cfg.risk
-    signals = {a: momentum(a, now.date()) for a in cfg.assets}
+    signals = {a: momentum(a, now.date(), store.mercado) for a in cfg.assets}
     out: list[Decision] = []
     for sym in sorted(signals, key=signals.get, reverse=True):
         m, held = signals[sym], store.value_usd(sym)
         if held > MIN_TRADE_USD and m <= -cfg.stop_loss_pct:
-            out.append(_sell(sym, held, f"Stop acionado: queda de {pct(m)} em 7 dias", now))
+            out.append(_sell(store.mercado, sym, held, f"Stop acionado: queda de {pct(m)} em 7 dias", now))
         elif held > MIN_TRADE_USD and m >= cfg.take_profit_pct:
-            out.append(_sell(sym, held * 0.3, f"Realizou lucro após alta de {pct(m)} em 7 dias", now))
+            out.append(_sell(store.mercado, sym, held * 0.3, f"Realizou lucro após alta de {pct(m)} em 7 dias", now))
         elif m >= buy_threshold and spendable > MIN_TRADE_USD:
             room = total * cfg.max_position_pct / 100 - held
             amount = min(spendable * cfg.trade_size_pct / 100 * size_factor, room)
             if amount > MIN_TRADE_USD:
                 spendable -= amount
-                out.append(_buy(sym, amount, f"Tendência de alta: +{pct(m)} em 7 dias", now))
+                out.append(_buy(store.mercado, sym, amount, f"Tendência de alta: +{pct(m)} em 7 dias", now))
     return out or [_hold(f"Manteve {_largest(store, cfg.assets)}", "Sinais fracos: nenhum ativo passou do limite de tendência", now)]
 
 
@@ -106,12 +107,12 @@ def _rebalance(cfg: AgentConfig, store: Store, now: datetime) -> list[Decision]:
         if abs(deviation) <= cfg.rebalance_threshold_pct:
             continue
         if deviation > 0:
-            out.append(_sell(sym, values[sym] - target, f"{sym} estava {pct(deviation)} acima da meta", now, "rebalance", f"Rebalanceou {sym}"))
+            out.append(_sell(store.mercado, sym, values[sym] - target, f"{sym} estava {pct(deviation)} acima da meta", now, "rebalance", f"Rebalanceou {sym}"))
         else:
             amount = min(target - values[sym], spendable)
             if amount > MIN_TRADE_USD:
                 spendable -= amount
-                out.append(_buy(sym, amount, f"{sym} estava {pct(deviation)} abaixo da meta", now, "rebalance", f"Rebalanceou {sym}"))
+                out.append(_buy(store.mercado, sym, amount, f"{sym} estava {pct(deviation)} abaixo da meta", now, "rebalance", f"Rebalanceou {sym}"))
     return out or [_hold("Carteira dentro da meta", f"Nenhum ativo desviou mais de {cfg.rebalance_threshold_pct}%", now)]
 
 
@@ -120,7 +121,7 @@ def _dca(cfg: AgentConfig, store: Store, now: datetime) -> list[Decision]:
     sym = cfg.assets[now.date().toordinal() % len(cfg.assets)]
     amount = spendable * cfg.trade_size_pct / 100
     if amount > MIN_TRADE_USD:
-        return [_buy(sym, amount, f"Compra recorrente de {cfg.trade_size_pct}% do caixa disponível", now)]
+        return [_buy(store.mercado, sym, amount, f"Compra recorrente de {cfg.trade_size_pct}% do caixa disponível", now)]
     return [_hold("Compra recorrente adiada", "Sem caixa disponível acima da reserva", now)]
 
 
@@ -133,7 +134,7 @@ def _conservative(cfg: AgentConfig, store: Store, now: datetime) -> list[Decisio
     if share > limit:
         sym = _largest(store, [a for a in CRYPTO_ORDER if a != "USDT"])
         excess = (share - limit) / 100 * total
-        return [_sell(sym, min(excess, store.value_usd(sym)), f"Cripto em {pct(share)} do patrimônio; limite de {limit}%", now, title=f"Reduziu {sym}")]
+        return [_sell(store.mercado, sym, min(excess, store.value_usd(sym)), f"Cripto em {pct(share)} do patrimônio; limite de {limit}%", now, title=f"Reduziu {sym}")]
     return [_hold("Manteve a exposição", f"Cripto em {pct(share)} do patrimônio, abaixo do limite de {limit}%", now)]
 
 
@@ -194,7 +195,7 @@ def _aplicar_regras(cfg: AgentConfig, store: Store, decisoes: list[Decision], no
             continue
         nota = (f" · Tamanho ajustado pelo risco de {num(cfg.rule_risk_pct)}% da conta com stop de {cfg.stop_loss_pct}%: "
                 f"{_usd(usd)} em vez de {_usd(t.usd)}")
-        saida.append(_buy(t.symbol, usd, d.detail + nota, now, d.kind, d.title))
+        saida.append(_buy(store.mercado, t.symbol, usd, d.detail + nota, now, d.kind, d.title))
     if not saida and decisoes:
         return [_hold("Compras suspensas pelas regras de risco", bloqueio or f"Nenhuma compra coube nas regras: {motivo}", now)]
     return saida
@@ -204,5 +205,5 @@ def decide(cfg: AgentConfig, store: Store, now: datetime | None = None) -> list[
     """Decisões que o algoritmo do agente tomaria agora (sem aplicá-las)."""
     if not cfg.active or cfg.strategy == "manual":
         return []
-    now = now or datetime.now()
+    now = now or store.mercado.agora()
     return _aplicar_regras(cfg, store, STRATEGY_FUNCS[cfg.strategy](cfg, store, now), now)

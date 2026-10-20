@@ -84,7 +84,7 @@ Detalhes em [`CONEXOES.md`](CONEXOES.md) e [`MCP_LOCAL.md`](MCP_LOCAL.md).
 
 | Item | Estado |
 |---|---|
-| Testes automatizados | ✅ 767 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
+| Testes automatizados | ✅ 791 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
 | Instalador Windows | 🟡 `scripts/build_windows.ps1` (PyInstaller + Inno Setup); não reexecutado nas últimas mudanças |
 | Capturas de tela | ✅ `scripts/screenshot.py` renderiza a janela inteira para conferir o visual |
 

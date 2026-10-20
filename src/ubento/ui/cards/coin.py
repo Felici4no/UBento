@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ...formatting import amount, money, number, pct
-from ...store import ASSETS, Store
+from ...store import Store
 from .. import theme
 from ..components import Card, Label, RoundButton, setup
 
@@ -163,7 +163,7 @@ class CoinCard(Card):
 
     def refresh(self) -> None:
         held = self.store.holdings.get(SYMBOL, 0.0)
-        price = ASSETS[SYMBOL].price
+        price = self.store.mercado.preco(SYMBOL)
         series = self.store.usdc_series()
         change = (series[-1] / series[0] - 1) * 100
         self.value.setText(money(held * price))

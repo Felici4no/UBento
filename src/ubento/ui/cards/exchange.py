@@ -7,7 +7,8 @@ from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen,
 from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLineEdit, QMenu, QVBoxLayout, QWidget
 
 from ...formatting import amount, money, number
-from ...store import ASSETS, Store
+from ...mercado import ATIVOS
+from ...store import Store
 from .. import icons, theme
 from ..components import Card, Label, RoundButton, draw_asset, hover_color, setup
 
@@ -42,7 +43,7 @@ class AssetSelector(QAbstractButton):
 
     def _open_menu(self) -> None:
         menu = QMenu(self)
-        for sym, asset in ASSETS.items():
+        for sym, asset in ATIVOS.items():
             held = self._store.holdings.get(sym, 0.0)
             menu.addAction(f"{sym}  ·  {asset.name}  ·  {amount(held, asset.decimals)}").setData(sym)
         chosen = menu.exec(self.mapToGlobal(self.rect().bottomRight()) - QPointF(220, 0).toPoint())
@@ -110,7 +111,7 @@ class AmountPanel(QFrame):
         self.setMinimumHeight(88)
 
     def set_available(self, symbol: str, value: float) -> None:
-        decimals = ASSETS[symbol].decimals
+        decimals = ATIVOS[symbol].decimals
         self.avail_value.setText(money(value) if symbol == "USD" else f"{amount(value, decimals)} {symbol}")
 
     def paintEvent(self, _e) -> None:
@@ -276,7 +277,7 @@ class ExchangeCard(Card):
         self.send_panel.selector.set_symbol(b)
         self.recv_panel.selector.set_symbol(a)
         if quote.receive_amount > 0:  # leva o valor recebido para o campo de envio
-            self.send_panel.input.setText(number(quote.receive_amount, ASSETS[b].decimals).replace(".", ""))
+            self.send_panel.input.setText(number(quote.receive_amount, ATIVOS[b].decimals).replace(".", ""))
         self.refresh()
 
     def refresh(self) -> None:
@@ -284,7 +285,7 @@ class ExchangeCard(Card):
         q = self.store.quote(send, receive, self.amount())
         self.send_panel.set_available(send, self.store.holdings.get(send, 0.0))
         self.recv_panel.set_available(receive, self.store.holdings.get(receive, 0.0))
-        self.recv_panel.out.setText(number(q.receive_amount, ASSETS[receive].decimals))
+        self.recv_panel.out.setText(number(q.receive_amount, ATIVOS[receive].decimals))
         self.rate.setText(f"1 {receive} = {number(q.rate, 2 if q.rate >= 1 else 6)} {send}")
         self.service.setText(f"{number(q.service_fee_usd, 2)} USD")
         self.gas.setText(f"{number(q.gas_fee_usd, 2)} USD")

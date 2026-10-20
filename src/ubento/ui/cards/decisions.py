@@ -147,7 +147,7 @@ class DecisionList(QWidget):
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         setup(p)
-        now = datetime.now()
+        now = self.store.mercado.agora()
         for i, d in enumerate(self.items()):
             y = i * ROW_H - self._offset
             if y + ROW_H < 0 or y > self.height():

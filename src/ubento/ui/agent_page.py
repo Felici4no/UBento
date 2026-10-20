@@ -302,7 +302,7 @@ class AgentConfigPage(QWidget):
         self.notify.emit("Pacote padrão de risco aplicado", True)
 
     def _update_schedule(self, cfg) -> None:
-        now = datetime.now()
+        now = self.ws.mercado.agora()
         if cfg.strategy == "manual" or not cfg.active:
             self.schedule.setText("Sem execuções agendadas.")
             return

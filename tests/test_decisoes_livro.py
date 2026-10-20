@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from ubento import formatting  # noqa: E402
 from ubento.engine import _trade  # noqa: E402
-from ubento.store import ASSETS, Decision, Store, Trade  # noqa: E402
+from ubento.store import Decision, Store, Trade  # noqa: E402
 from ubento.ui import theme  # noqa: E402
 from ubento.ui.cards.decisions import ROW_H, DecisionList, linha_de_log, resultado_cor, resultado_info, usd_texto  # noqa: E402
 
@@ -43,9 +43,9 @@ def store():
 
 def test_compra_resultado_no_ato_e_so_a_taxa_e_a_posicao_fica_em_aberto(store):
     # compra de 1.000 USD de ETH (3.852,93): taxa 0,10% = 1,00; entram (1.000 − 1,00) / 3.852,93 unidades
-    t = _trade("buy", "ETH", 1000.0)
+    t = _trade(store.mercado, "buy", "ETH", 1000.0)
     assert t.fee == 1.00 and t.usd == 1000.0
-    assert t.qty * ASSETS["ETH"].price == pytest.approx(999.0, abs=0.02)  # a taxa saiu do que se recebe (as unidades têm 5 casas)
+    assert t.qty * store.mercado.preco("ETH") == pytest.approx(999.0, abs=0.02)  # a taxa saiu do que se recebe (as unidades têm 5 casas)
     pnl = store.executar_trade(t)
     assert pnl == -1.00  # valor recebido (999,00) − pago (1.000,00): o custo de entrar é a taxa
     assert store.holdings["USD"] == 9000.0  # saiu exatamente o valor aplicado
@@ -54,7 +54,7 @@ def test_compra_resultado_no_ato_e_so_a_taxa_e_a_posicao_fica_em_aberto(store):
 
 def test_venda_com_lucro_realizado_liquido_da_taxa(store):
     # vende 1 ETH a 3.852,93: taxa = 3,85; entram 3.849,08. Custo médio 3.000 → resultado = 3.849,08 − 3.000 = +849,08
-    t = _trade("sell", "ETH", 3852.93)
+    t = _trade(store.mercado, "sell", "ETH", 3852.93)
     assert (t.qty, t.usd, t.fee) == (1.0, 3852.93, 3.85)
     assert store.executar_trade(t) == pytest.approx(849.08, abs=0.01)
     assert store.holdings["USD"] == pytest.approx(10000.0 + 3849.08)
@@ -64,7 +64,7 @@ def test_venda_com_lucro_realizado_liquido_da_taxa(store):
 def test_venda_com_prejuizo_realizado(store):
     store.cost_basis["ETH"] = 10000.0  # 2 ETH custaram 10.000: custo médio 5.000
     # vende 1 ETH: entram 3.849,08; custo 5.000 → resultado = 3.849,08 − 5.000 = −1.150,92
-    assert store.executar_trade(_trade("sell", "ETH", 3852.93)) == pytest.approx(-1150.92, abs=0.01)
+    assert store.executar_trade(_trade(store.mercado, "sell", "ETH", 3852.93)) == pytest.approx(-1150.92, abs=0.01)
 
 
 def test_saldo_insuficiente_nao_altera_nada(store):
@@ -91,8 +91,8 @@ def test_swap_de_cripto_realiza_o_ganho_pelo_custo_medio(store):
 
 
 def test_decisao_executada_ganha_valor_taxa_e_resultado_e_a_proposta_so_estimativa(store):
-    venda = Decision("sell", "Vendeu ETH", "teste", "- 1,00000 ETH", AGORA, trade=_trade("sell", "ETH", 3852.93), status="executed")
-    proposta = Decision("sell", "Venderia ETH", "teste", "- 1,00000 ETH", AGORA, trade=_trade("sell", "ETH", 3852.93), status="proposed", value_usd=3852.93, fee_usd=3.85)
+    venda = Decision("sell", "Vendeu ETH", "teste", "- 1,00000 ETH", AGORA, trade=_trade(store.mercado, "sell", "ETH", 3852.93), status="executed")
+    proposta = Decision("sell", "Venderia ETH", "teste", "- 1,00000 ETH", AGORA, trade=_trade(store.mercado, "sell", "ETH", 3852.93), status="proposed", value_usd=3852.93, fee_usd=3.85)
     store.add_decision(venda)
     store.add_decision(proposta)
     executada, pendente = store.decisions[1], store.decisions[0]

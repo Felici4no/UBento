@@ -23,7 +23,8 @@ from pydantic import ValidationError
 from .metas import ErroDeRegistro, ServicoMetas
 from .nucleo.avaliacao.estado import TERMINAIS
 from .nucleo.esquema import Execucao, LadoExecucao, Meta, OrigemDado
-from .store import ASSETS, Decision
+from .mercado import ATIVOS
+from .store import Decision
 from .workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def execucao_da_decisao(decisao: Decision, meta: Meta, ativada_em: datetime) -> 
         raise NaoAplicavel("a compra foi feita depois do prazo da meta")
 
     preco = t.preco or (t.usd - t.fee) / t.qty  # trades antigos não guardavam o preço: o valor líquido por unidade é o que sobra
-    casas = ASSETS[t.symbol].decimals
+    casas = ATIVOS[t.symbol].decimals
     liquida = _decimal(t.qty, casas)  # o que a carteira recebeu
     taxa = _decimal(t.fee / preco, casas)  # a taxa sai do que se recebe: é cobrada no próprio ativo
     try:

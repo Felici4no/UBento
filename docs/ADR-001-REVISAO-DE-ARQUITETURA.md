@@ -104,7 +104,7 @@ Tratar a carteira como painel de simulação e as metas como sistema à parte, a
 
 1. [x] **Ponte carteira → núcleo** (feito: [`PONTE_CARTEIRA_METAS.md`](PONTE_CARTEIRA_METAS.md)). Adaptador `Decisão executada → Execucao`, com conversão explícita (casas do ativo, hora local → UTC), origem *simulada* no mercado real e na demonstração, e teste de equivalência com contas à mão.
 2. [x] **Extrair o tipo de mercado do adaptador de rede** (feito): `Cotacoes` vive em `ubento/cotacoes.py`; `conexoes.mercado` depende dele (A6).
-3. [ ] **Fonte de preços e relógio injetáveis.** Trocar `ASSETS`/`MERCADO` globais e os `datetime.now()` por uma `FonteDePrecos` e um relógio passados ao `Store`/`Workspace`; manter um valor padrão para a interface (A3).
+3. [x] **Fonte de preços e relógio injetáveis** (feito, A3): `ubento/mercado.py` traz `Mercado` (preços, sinais, frescor e relógio). Cada `Workspace` tem o seu e o entrega a todos os `Store`; um `Store` avulso cria o próprio. Não existem mais `ASSETS` nem `MERCADO` globais e o domínio e as telas não chamam `datetime.now()` (testado). O cadastro dos ativos (`ATIVOS`) é imutável.
 4. [ ] **Persistir as carteiras do mercado real** em SQLite, em `Decimal` e UTC, com id de agente estável; definir o destino das metas de um agente removido (arquivar, não deixar órfã) (A4).
 5. [~] **Teste de arquitetura para as camadas** (parcial, `tests/test_camadas.py`): núcleo, persistência e conexões não importam a UI; o domínio da carteira não importa adaptadores nem banco; o núcleo não importa o resto do app. Falta a regra "a UI não importa `conexoes` direto, só serviços", que a UI de Configurações hoje não cumpre.
 6. [ ] **Agendador com relógio injetado**, ou esconder "próxima execução" até existir (A7).

@@ -19,7 +19,8 @@ from ubento.metas import ServicoMetas  # noqa: E402
 from ubento.nucleo.avaliacao.reproducao import carregar_reproducao_meta  # noqa: E402
 from ubento.nucleo.esquema import EstadoMeta, Execucao, LadoExecucao, OrigemDado  # noqa: E402
 from ubento.ponte_metas import FONTE_CARTEIRA, NaoAplicavel, PonteCarteiraMetas, execucao_da_decisao  # noqa: E402
-from ubento.store import ASSETS, MERCADO, Decision, Trade  # noqa: E402
+from ubento.mercado import Mercado  # noqa: E402
+from ubento.store import Decision, Trade  # noqa: E402
 from ubento.workspace import Workspace  # noqa: E402
 
 UTC = timezone.utc
@@ -32,11 +33,16 @@ def local(instante_utc: datetime) -> datetime:
     return instante_utc.astimezone().replace(tzinfo=None)
 
 
+class Atual:
+    """O mercado do teste em curso (cada teste tem o seu; não existe mercado global)."""
+
+    mercado: Mercado
+
+
 @pytest.fixture(autouse=True)
-def limpo():
-    MERCADO.desativar()
-    yield
-    MERCADO.desativar()
+def mercado_do_teste():
+    Atual.mercado = Mercado()
+    yield Atual.mercado
 
 
 @pytest.fixture
@@ -49,11 +55,11 @@ def arquivo_eth(tmp_path):
 
 
 def com_preco(preco: float) -> None:
-    MERCADO.aplicar({"ETH": preco}, {}, DENTRO)
+    Atual.mercado.aplicar({"ETH": preco}, {}, DENTRO)
 
 
 def compra_executada(usd=1000.0, quando=DENTRO, simbolo="ETH") -> Decision:
-    d = engine._buy(simbolo, usd, "Compra recorrente", local(quando))
+    d = engine._buy(Atual.mercado, simbolo, usd, "Compra recorrente", local(quando))
     return Decision(**{**d.__dict__, "status": "executed", "pnl_usd": -d.trade.fee, "pnl_realizado": False})
 
 
@@ -120,13 +126,13 @@ def test_so_decisao_executada_com_movimento(arquivo_eth, mudar, trecho):
 
 def test_venda_nao_entra_porque_o_nucleo_mede_aquisicao(arquivo_eth):
     com_preco(2000.0)
-    venda = engine._sell("ETH", 500.0, "Realizou lucro", local(DENTRO))
+    venda = engine._sell(Atual.mercado, "ETH", 500.0, "Realizou lucro", local(DENTRO))
     with pytest.raises(NaoAplicavel, match="venda"):
         execucao_da_decisao(Decision(**{**venda.__dict__, "status": "executed"}), arquivo_eth.meta, DENTRO.replace(hour=8))
 
 
 def test_outro_ativo_nao_entra(arquivo_eth):
-    MERCADO.aplicar({"SOL": 100.0}, {}, DENTRO)
+    Atual.mercado.aplicar({"SOL": 100.0}, {}, DENTRO)
     with pytest.raises(NaoAplicavel, match="ativo"):
         execucao_da_decisao(compra_executada(simbolo="SOL"), arquivo_eth.meta, DENTRO.replace(hour=8))
 
@@ -154,6 +160,7 @@ def test_antes_da_ativacao_e_depois_do_prazo_nao_entra(arquivo_eth):
 @pytest.fixture
 def mundo(arquivo_eth):
     ws = Workspace()
+    Atual.mercado = ws.mercado  # as ordens do teste usam o mesmo mercado da carteira
     servico = ServicoMetas()
     agente = ws.agents[0]
     agente.store.holdings, agente.store.cost_basis, agente.store.decisions = {"USD": 10_000.0}, {}, []
@@ -193,7 +200,7 @@ def test_venda_executada_nao_vira_execucao_e_nao_gera_erro(mundo):
     erros = []
     ponte.falhou.connect(erros.append)
     agente.store.holdings = {"USD": 0.0, "ETH": 2.0}
-    agente.store.add_decision(Decision(**{**engine._sell("ETH", 1000.0, "x", local(DENTRO)).__dict__, "status": "executed"}))
+    agente.store.add_decision(Decision(**{**engine._sell(Atual.mercado, "ETH", 1000.0, "x", local(DENTRO)).__dict__, "status": "executed"}))
     assert servico.painel(meta_id).execucoes == () and erros == []
 
 
@@ -207,6 +214,7 @@ def test_meta_de_outro_agente_nao_recebe(mundo, arquivo_eth):
 
 def test_meta_real_nao_recebe_execucao_simulada(arquivo_eth):
     ws, servico = Workspace(), ServicoMetas()
+    Atual.mercado = ws.mercado
     agente = ws.agents[0]
     agente.store.holdings, agente.store.decisions = {"USD": 10_000.0}, []
     meta_id = servico.importar(arquivo_eth, agente_id=agente.id, cenario=False)  # meta do mundo real
@@ -258,6 +266,7 @@ def test_a_janela_liga_a_ponte_e_atualiza_a_tela_de_metas(arquivo_eth):
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(theme.APP_QSS)
     ws, servico = Workspace(), ServicoMetas()
+    Atual.mercado = ws.mercado
     agente = ws.agents[0]
     agente.store.holdings, agente.store.decisions = {"USD": 10_000.0}, []
     meta_id = servico.importar(arquivo_eth, agente_id=agente.id)
@@ -273,5 +282,5 @@ def test_a_janela_liga_a_ponte_e_atualiza_a_tela_de_metas(arquivo_eth):
 
 
 def test_trade_guarda_o_preco_da_ordem():
-    t = engine._trade("buy", "ETH", 1000.0)
-    assert t.preco == ASSETS["ETH"].price and Trade("sell", "ETH", 1.0, 100.0, 0.1).preco == 0.0  # trades antigos seguem válidos
+    t = engine._trade(Atual.mercado, "buy", "ETH", 1000.0)
+    assert t.preco == Atual.mercado.preco("ETH") and Trade("sell", "ETH", 1.0, 100.0, 0.1).preco == 0.0  # trades antigos seguem válidos
