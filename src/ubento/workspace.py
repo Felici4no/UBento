@@ -15,7 +15,7 @@ from PySide6.QtCore import QObject, QSettings, Signal
 
 from . import engine, formatting
 from .agent_config import AgentConfig
-from .conexoes.mercado import Cotacoes
+from .cotacoes import Cotacoes
 from .store import AGUARDANDO_PRECOS, MERCADO, RANGES, Store
 
 OVERVIEW = "overview"

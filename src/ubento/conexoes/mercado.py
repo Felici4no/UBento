@@ -10,19 +10,12 @@ import json
 import math
 import urllib.parse
 
-from dataclasses import dataclass
-
+from ..cotacoes import Cotacoes
 from .binance import BASE, TEMPO_LIMITE, ErroDeConexao, Transporte, transporte_http
 
 # ativo do UBento -> par na Binance (cotado em USDT)
 PARES: dict[str, str] = {"ETH": "ETHUSDT", "SOL": "SOLUSDT", "AVAX": "AVAXUSDT", "BNB": "BNBUSDT", "USDC": "USDCUSDT"}
 FIXOS: dict[str, float] = {"USDT": 1.0, "USD": 1.0}
-
-
-@dataclass(frozen=True)
-class Cotacoes:
-    precos: dict[str, float]  # USD por unidade
-    variacao_7d: dict[str, float]  # % na janela móvel de 7 dias (dado real da Binance); USD e USDT não variam
 
 
 class ClienteMercado:

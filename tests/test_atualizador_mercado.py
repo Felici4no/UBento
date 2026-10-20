@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from ubento.atualizador_mercado import AtualizadorDeMercado  # noqa: E402
 from ubento.conexoes.binance import ErroDeConexao  # noqa: E402
-from ubento.conexoes.mercado import Cotacoes  # noqa: E402
+from ubento.cotacoes import Cotacoes  # noqa: E402
 
 COT = Cotacoes({"ETH": 2000.0}, {"ETH": 1.0})
 

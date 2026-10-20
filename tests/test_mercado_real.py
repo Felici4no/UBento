@@ -13,7 +13,7 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
 
 from ubento import engine  # noqa: E402
-from ubento.conexoes.mercado import Cotacoes  # noqa: E402
+from ubento.cotacoes import Cotacoes  # noqa: E402
 from ubento.engine import _trade  # noqa: E402
 from ubento.store import ASSETS, CAPITAL_INICIAL_REAL, MERCADO  # noqa: E402
 from ubento.workspace import Workspace  # noqa: E402
