@@ -33,10 +33,10 @@ def _trade(side: str, symbol: str, usd: float) -> Trade:
     if side == "buy":
         taxa = round(usd * TRADE_FEE_RATE, 2)
         qty = round((usd - taxa) / asset.price, asset.decimals)
-        return Trade(side, symbol, qty, round(usd, 2), taxa)
+        return Trade(side, symbol, qty, round(usd, 2), taxa, asset.price)
     qty = round(usd / asset.price, asset.decimals)
     valor = round(qty * asset.price, 2)
-    return Trade(side, symbol, qty, valor, round(valor * TRADE_FEE_RATE, 2))
+    return Trade(side, symbol, qty, valor, round(valor * TRADE_FEE_RATE, 2), asset.price)
 
 
 def _effect(trade: Trade) -> str:

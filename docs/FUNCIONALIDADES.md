@@ -64,6 +64,7 @@ O coração do projeto: um núcleo determinístico, sem Qt, rede nem relógio do
 | Tela de **Metas** | ✅ | Progresso, pendências, eventos, última avaliação (com a origem do instante). |
 | Registrar execução | ✅ | Formulário de execução da meta, com validação. |
 | Vínculo manual e correção | ✅ | Ligar uma execução a um registro externo com justificativa; revogar ou substituir com trilha auditável; um registro não serve a duas metas. |
+| **Ponte carteira → metas** | ✅ | Uma compra executada por um agente vira execução (simulada, sem registro externo, em `Decimal` e UTC) das metas de cenário do mesmo agente e do mesmo ativo. Vendas, metas reais e metas encerradas ficam de fora. Ver [`PONTE_CARTEIRA_METAS.md`](PONTE_CARTEIRA_METAS.md). |
 | Cenários de exemplo | ✅ | `exemplos/` traz cenários fictícios de reprodução; `scripts/gerar_cenarios_*.py` os regenera. |
 
 **Limitações conhecidas:** a evidência externa é um arquivo fornecido pelo usuário com campos autodeclarados, então a autenticidade não é provada; com duas fontes não há união automática; taxa em um terceiro ativo deixa o orçamento indeterminado; `exposicao_maxima` abaixo de 1 impede concluir a meta; bancos antigos com cenários simulados precisam reimportar os cenários regenerados.
@@ -83,7 +84,7 @@ Detalhes em [`CONEXOES.md`](CONEXOES.md) e [`MCP_LOCAL.md`](MCP_LOCAL.md).
 
 | Item | Estado |
 |---|---|
-| Testes automatizados | ✅ 745 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
+| Testes automatizados | ✅ 767 testes (núcleo com testes de propriedade, concorrência, interface offscreen) e `pyflakes` limpo |
 | Instalador Windows | 🟡 `scripts/build_windows.ps1` (PyInstaller + Inno Setup); não reexecutado nas últimas mudanças |
 | Capturas de tela | ✅ `scripts/screenshot.py` renderiza a janela inteira para conferir o visual |
 

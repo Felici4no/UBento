@@ -1,6 +1,6 @@
 # ADR-001: Revisão da arquitetura e ligação entre carteira e metas
 
-**Status:** Proposto
+**Status:** Aceito (passo 1 concluído em 2026-10-20)
 **Data:** 2026-10-20
 **Quem decide:** Lucas (dono do projeto)
 
@@ -102,7 +102,7 @@ Tratar a carteira como painel de simulação e as metas como sistema à parte, a
 
 ## Plano de ação (em ordem)
 
-1. [ ] **Ponte carteira → núcleo.** Adaptador `Decisão executada → Execucao`, com conversão explícita (casas do ativo, hora local → UTC), origem *simulada* no mercado real e na demonstração, e teste de equivalência com contas à mão.
+1. [x] **Ponte carteira → núcleo** (feito: [`PONTE_CARTEIRA_METAS.md`](PONTE_CARTEIRA_METAS.md)). Adaptador `Decisão executada → Execucao`, com conversão explícita (casas do ativo, hora local → UTC), origem *simulada* no mercado real e na demonstração, e teste de equivalência com contas à mão.
 2. [ ] **Extrair o tipo de mercado do adaptador de rede.** Mover `Cotacoes` para um módulo de domínio; `conexoes.mercado` passa a depender dele (A6).
 3. [ ] **Fonte de preços e relógio injetáveis.** Trocar `ASSETS`/`MERCADO` globais e os `datetime.now()` por uma `FonteDePrecos` e um relógio passados ao `Store`/`Workspace`; manter um valor padrão para a interface (A3).
 4. [ ] **Persistir as carteiras do mercado real** em SQLite, em `Decimal` e UTC, com id de agente estável; definir o destino das metas de um agente removido (arquivar, não deixar órfã) (A4).

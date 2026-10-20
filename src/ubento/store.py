@@ -112,6 +112,7 @@ class Trade:
     qty: float  # unidades que entram (compra, já líquidas da taxa) ou saem (venda)
     usd: float  # valor negociado: o caixa que sai numa compra; qty × preço numa venda
     fee: float = 0.0  # taxa em USD. Na compra sai do que se recebe; na venda sai do que entra no caixa
+    preco: float = 0.0  # preço do ativo em USD no momento da ordem (0 = não registrado: trades antigos)
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,7 @@ def make_quote(send: str, receive: str, amount: float) -> Quote:
 
 class Store(QObject):
     changed = Signal()
+    executed = Signal(object)  # uma decisão com movimento acabou de ser executada (já com valor, taxa e resultado preenchidos)
 
     def __init__(self, now: datetime | None = None, seed: str = "main", scale: float = 1.0, real: bool = False) -> None:
         super().__init__()
@@ -395,6 +397,8 @@ class Store(QObject):
                 return "Saldo insuficiente"
         self.decisions.insert(0, self._com_livro(decision, pnl))
         self.changed.emit()
+        if decision.status == "executed" and decision.trade:
+            self.executed.emit(self.decisions[0])
         return None
 
     def resolve_decision(self, uid: str, approve: bool) -> str | None:
@@ -424,6 +428,8 @@ class Store(QObject):
                 return "Saldo insuficiente para registrar a execução"
         self.decisions[index] = replace(self._com_livro(d, pnl), status="executed", moment=now or datetime.now())
         self.changed.emit()
+        if d.trade:
+            self.executed.emit(self.decisions[index])
         return None
 
     def resultado_do_dia(self, dia: date) -> float:

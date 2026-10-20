@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from ..conexoes import CofreMemoria, ServicoConexoes
 from ..metas import ServicoMetas
+from ..ponte_metas import PonteCarteiraMetas
 from ..store import Store
 from ..workspace import COLORS, OVERVIEW, Workspace
 from . import theme
@@ -134,6 +135,10 @@ class MainWindow(QMainWindow):
 
         self.workspace = workspace
         self.metas = metas or ServicoMetas()  # sem banco informado: em memória (testes, capturas)
+        # compras executadas pelos agentes viram execuções das metas do mesmo agente (ADR-001)
+        self.ponte = PonteCarteiraMetas(workspace, self.metas)
+        self.ponte.falhou.connect(lambda m: self.toast.show_message(m, False))
+        self.ponte.registrada.connect(self._execucao_registrada)
         # sem serviço informado: conexões só em memória e com cofre temporário (testes e capturas nunca tocam o cofre real)
         self.conexoes = conexoes or ServicoConexoes(self.metas.repo, CofreMemoria())
         self.ouvintes = ouvintes  # ouvintes do bot do Telegram (None em testes e capturas)
@@ -305,6 +310,12 @@ class MainWindow(QMainWindow):
             page.back_requested.connect(lambda: self.select(agent_id))
             self.pages[key] = self._scroll(page)
         self.select(key)
+
+    def _execucao_registrada(self, meta_id: str, _execucao_id: str) -> None:
+        """Uma compra do agente entrou numa meta: se a tela de Metas daquele agente já está aberta, ela se atualiza."""
+        for chave, pagina in self.pages.items():
+            if chave.startswith(METAS):
+                (pagina.widget() if hasattr(pagina, "widget") else pagina).refresh()
 
     def open_metas(self, agent_id: str) -> None:
         key = METAS + agent_id

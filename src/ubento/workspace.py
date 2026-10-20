@@ -41,6 +41,7 @@ class Workspace(QObject):
     agent_changed = Signal(str)  # configuração de um agente mudou (id)
     prefs_changed = Signal()
     mercado_changed = Signal()  # chegou uma leitura (ou uma falha) do mercado real
+    decisao_executada = Signal(str, object)  # (id do agente, decisão): uma decisão com movimento foi executada
 
     def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
@@ -292,6 +293,7 @@ class Workspace(QObject):
         real = self.mercado_real
         store = Store(seed=seed, scale=scale, real=real)
         store.owner_id = agent_id
+        store.executed.connect(lambda decisao, agente=agent_id: self.decisao_executada.emit(agente, decisao))
         return store
 
     def performance(self, agent: Agent, range_key: str) -> tuple[float, float]:
